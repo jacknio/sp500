@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SPX Rare Event Analyzer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="loading-state" id="loadingState">Loading interval data...</div>
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow" id="heroEyebrow">S&P 500 rare event monitor</p>
+          <h1 id="heroTitle">SPX Candles, rarity, and what usually happens next.</h1>
+          <p class="hero-text" id="heroText">
+            切换日线、周线、月线，直接看当前最值得关注的 3 个 rare events，以及它们历史上出现过几次、后续上涨概率、和相对 unconditional 的收益分布。
+          </p>
+          <div class="freshness">
+            <span id="dataFreshness" data-date="{{ freshness.latest_merged_date }}">Data updated through {{ freshness.latest_merged_date }}</span>
+          </div>
+        </div>
+        <div class="hero-summary">
+          <div class="summary-head">
+            <div class="summary-label" id="summaryLabel">Current read</div>
+            <div class="language-switch" id="languageSwitch">
+              <button type="button" class="language-button active" data-lang="zh">中文</button>
+              <button type="button" class="language-button" data-lang="en">English</button>
+            </div>
+          </div>
+          <div class="summary-text" id="summaryText">Loading current interval summary...</div>
+          <div class="interval-switch" id="intervalSwitch">
+            {% for interval in intervals %}
+            <button type="button" class="interval-button{% if interval == 'daily' %} active{% endif %}" data-interval="{{ interval }}">
+              {{ interval|title }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="chart-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" id="chartKicker">Candlestick</p>
+              <h2 id="chartHeading">Price structure</h2>
+            </div>
+            <div class="chart-controls">
+              <div class="range-switch" id="rangeSwitch">
+                <button type="button" class="range-button active" data-range="1Y">1Y</button>
+                <button type="button" class="range-button" data-range="3Y">3Y</button>
+                <button type="button" class="range-button" data-range="5Y">5Y</button>
+                <button type="button" class="range-button" data-range="MAX">Max</button>
+              </div>
+              <div class="chart-meta" id="chartMeta"></div>
+            </div>
+          </div>
+          <div id="candles" class="candles"></div>
+        </section>
+
+        <section class="event-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" id="eventKicker">Current rare events</p>
+              <h2 id="eventHeading">Live signal board</h2>
+            </div>
+          </div>
+          <div id="eventList" class="event-list"></div>
+        </section>
+
+        <section class="detail-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" id="detailKicker">Event detail</p>
+              <h2 id="detailTitle">Select an event</h2>
+            </div>
+            <div class="detail-tag" id="detailTag">Conditional vs unconditional</div>
+          </div>
+
+          <div class="stats-grid" id="statsGrid"></div>
+
+          <div class="definition-box">
+            <div class="distribution-header">
+              <div>
+                <h3 id="definitionHeading">Signal definition</h3>
+                <div class="detail-subtitle" id="definitionSubtitle">Exact trigger rules and current thresholds</div>
+              </div>
+            </div>
+            <div id="definitionList" class="definition-list"></div>
+          </div>
+
+          <div class="detail-split">
+            <div class="examples-wrap">
+              <div class="distribution-header">
+                <h3 id="occurrenceHeading">Recent occurrences</h3>
+                <div class="detail-subtitle" id="occurrenceSubtitle">Latest triggered examples</div>
+              </div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr id="occurrenceHeadRow"></tr>
+                  </thead>
+                  <tbody id="occurrenceBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="distribution-wrap compact">
+              <div class="distribution-header">
+                <div>
+                  <h3 id="distributionHeading">Return distribution</h3>
+                  <div class="detail-subtitle" id="distributionSubtitle">Conditional vs unconditional</div>
+                </div>
+                <div class="window-switch" id="windowSwitch"></div>
+              </div>
+              <canvas id="distributionChart" height="118"></canvas>
+            </div>
+          </div>
+
+          <div class="examples-wrap">
+            <h3 id="historicalExamplesHeading">Historical examples</h3>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th id="historyDateHead">Date</th>
+                    <th id="historyReturnHead">Close Return</th>
+                    <th id="historyRangeHead">Range</th>
+                    <th id="historyDownHead">Down Streak</th>
+                    <th id="historyBearishHead">Bearish Streak</th>
+                  </tr>
+                </thead>
+                <tbody id="examplesBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+  </html>
