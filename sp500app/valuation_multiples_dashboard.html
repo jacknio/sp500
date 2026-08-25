@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S&P 500 Valuation Multiples Dashboard</title>
+<style>
+:root {
+  --paper: #f7f4ef;
+  --panel: #fffdf8;
+  --ink: #1a1714;
+  --muted: #6f6962;
+  --line: #ddd6cc;
+  --blue: #163a5f;
+  --blue-soft: #dce8f1;
+  --green: #5c7d32;
+  --rust: #a6542a;
+  --gold: #c29137;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 34px 24px 48px;
+}
+.topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 22px;
+}
+h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 46px);
+  line-height: 1.02;
+  letter-spacing: 0;
+  max-width: 820px;
+}
+.scope {
+  margin: 12px 0 0;
+  color: var(--muted);
+  max-width: 820px;
+  line-height: 1.5;
+}
+.stamp {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  margin: 24px 0;
+}
+.metric {
+  background: var(--panel);
+  padding: 16px 18px;
+  min-height: 106px;
+}
+.label {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.value {
+  display: block;
+  margin-top: 10px;
+  font-size: 28px;
+  line-height: 1.05;
+  font-weight: 760;
+}
+.sub {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  margin-top: 20px;
+}
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: end;
+  padding: 20px 22px 12px;
+  border-bottom: 1px solid var(--line);
+}
+h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+.section-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 760px;
+}
+.legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.swatch {
+  width: 16px;
+  height: 10px;
+  background: var(--blue);
+}
+.diamond {
+  width: 10px;
+  height: 10px;
+  background: var(--green);
+  transform: rotate(45deg);
+}
+.chart-wrap {
+  position: relative;
+  padding: 16px 18px 18px;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.axis, .bucket-label, .small-note {
+  fill: var(--muted);
+  font-size: 12px;
+}
+.zero-line {
+  stroke: #81786f;
+  stroke-width: 1;
+}
+.grid-line {
+  stroke: #ece5db;
+  stroke-width: 1;
+}
+.bar {
+  fill: var(--blue);
+  transition: opacity .18s ease, transform .18s ease;
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+.bar:hover {
+  opacity: .86;
+}
+.point {
+  fill: var(--green);
+  transition: transform .18s ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.point:hover {
+  transform: scale(1.22) rotate(45deg);
+}
+.forecast-box {
+  fill: none;
+  stroke: var(--rust);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+}
+.tooltip {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  min-width: 190px;
+  background: #1d1a16;
+  color: #fffaf1;
+  padding: 10px 11px;
+  border-radius: 6px;
+  box-shadow: 0 14px 30px rgba(0,0,0,.18);
+  font-size: 13px;
+  line-height: 1.35;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.tooltip.on {
+  opacity: 1;
+  transform: translateY(0);
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 18px 0;
+}
+button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fffbf4;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, color .16s ease;
+}
+button:hover, button.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+}
+.table-wrap {
+  overflow-x: auto;
+  padding: 14px 18px 20px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+  font-size: 13px;
+}
+th, td {
+  text-align: right;
+  padding: 10px 9px;
+  border-bottom: 1px solid #eee6da;
+}
+th:first-child, td:first-child,
+th:nth-child(2), td:nth-child(2) {
+  text-align: left;
+}
+th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  font-weight: 700;
+}
+tbody tr {
+  transition: background .14s ease;
+}
+tbody tr:hover {
+  background: #f5efe5;
+}
+.positive { color: #27653b; font-weight: 680; }
+.negative { color: #a13e25; font-weight: 680; }
+.callout {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 1px;
+  background: var(--line);
+  border-top: 1px solid var(--line);
+}
+.callout > div {
+  background: #fbf8f1;
+  padding: 17px 20px;
+}
+.callout strong {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.callout p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+@media (max-width: 850px) {
+  .topline {
+    display: block;
+  }
+  .stamp {
+    text-align: left;
+    margin-top: 14px;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .section-head {
+    display: block;
+  }
+  .legend {
+    margin-top: 12px;
+  }
+  .callout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .shell {
+    padding: 24px 14px 34px;
+  }
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+  .metric {
+    min-height: auto;
+  }
+  .chart-wrap {
+    padding: 12px 8px 14px;
+  }
+}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="topline">
+    <div>
+      <h1>S&P 500 EPS Growth vs Trailing P/E Change</h1>
+      <p class="scope">Local-data version using annual S&P 500 EPS and year-end price. P/E is calculated as year-end PX_LAST divided by T12_EPS_AGGTE, then grouped by EPS growth buckets.</p>
+    </div>
+    <div class="stamp">Generated 2026-08-25 15:52<br>Source: FA1.xlsx + spxdata/FA1_sun3i1sn.xlsx</div>
+  </header>
+
+  <section class="metrics">
+    <div class="metric">
+      <div class="label">Sample</div>
+      <span class="value">2010-2025</span>
+      <div class="sub">16 annual observations from available overlap.</div>
+    </div>
+    <div class="metric">
+      <div class="label">Very Strong Growth</div>
+      <span class="value">-22.6% median P/E change</span>
+      <div class="sub">0% expansion frequency</div>
+    </div>
+    <div class="metric">
+      <div class="label">2026 Local Estimate</div>
+      <span class="value">+25.3% EPS growth</span>
+      <div class="sub">>20% bucket</div>
+    </div>
+    <div class="metric">
+      <div class="label">Method</div>
+      <span class="value">Trailing</span>
+      <div class="sub">Calculated P/E, not Goldman&apos;s WWII full-sample source.</div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <div>
+        <h2>Bucket Summary</h2>
+        <p>Bars show median trailing P/E change; diamonds show how often P/E expanded in that EPS-growth bucket.</p>
+      </div>
+      <div class="legend">
+        <span><i class="swatch"></i>Median P/E Change</span>
+        <span><i class="diamond"></i>Expansion Frequency</span>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg id="bucketChart" viewBox="0 0 1040 520" role="img" aria-label="S&P 500 P/E changes by EPS growth bucket"></svg>
+    </div>
+    <div class="callout">
+      <div>
+        <strong>Read-through from local data</strong>
+        <p>In this short sample, the highest EPS-growth years had the weakest median P/E change. The direction matches the screenshot, but sample length is much smaller.</p>
+      </div>
+      <div>
+        <strong>2026 marker</strong>
+        <p>The local 2026 EPS estimate falls in the >20% bucket, not the 15-20% bucket shown in the Goldman slide.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <div>
+        <h2>Annual Observations</h2>
+        <p>Each dot is one year. The table uses the same calculated trailing P/E definition as the bucket chart.</p>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg id="scatterChart" viewBox="0 0 1040 430" role="img" aria-label="Annual EPS growth and P/E change scatter"></svg>
+    </div>
+    <div class="filters" id="filters"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Year</th>
+            <th>Bucket</th>
+            <th>EPS Growth</th>
+            <th>P/E Change</th>
+            <th>Price Return</th>
+            <th>EPS</th>
+            <th>Year-end Price</th>
+            <th>P/E</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<div id="tooltip" class="tooltip"></div>
+<script>
+const DATA = {"records": [{"year": 2010, "bucket": ">20%", "epsGrowth": 45.66929407331386, "peChange": -22.576195080561522, "priceReturn": 12.782710070845681, "eps": 83.8841, "price": 1257.64, "pe": 14.992590967775778}, {"year": 2011, "bucket": "15-20%", "epsGrowth": 18.71320071384208, "peChange": -15.765379099892218, "priceReturn": -0.002385420311079578, "eps": 99.5815, "price": 1257.61, "pe": 12.628952164809727}, {"year": 2012, "bucket": "0-10%", "epsGrowth": 3.9954208361994814, "peChange": 9.04787029727614, "priceReturn": 13.404791628565317, "eps": 103.5602, "price": 1426.19, "pe": 13.771603376586759}, {"year": 2013, "bucket": "0-10%", "epsGrowth": 8.02364228728798, "peChange": 19.97488932209992, "priceReturn": 29.601245275874867, "eps": 111.8695, "price": 1848.36, "pe": 16.52246590893854}, {"year": 2014, "bucket": "10-15%", "epsGrowth": 10.16255547758771, "peChange": 1.1147914138831316, "priceReturn": 11.390638187366097, "eps": 123.2383, "price": 2058.9, "pe": 16.706656940253154}, {"year": 2015, "bucket": "<0%", "epsGrowth": -2.348214800106785, "peChange": 1.6606078561877569, "priceReturn": -0.726601583369757, "eps": 120.3444, "price": 2043.94, "pe": 16.984088997909335}, {"year": 2016, "bucket": "0-10%", "epsGrowth": 0.29448815233614756, "peChange": 9.21339519534763, "priceReturn": 9.53501570496198, "eps": 120.6988, "price": 2238.83, "pe": 18.54890023761628}, {"year": 2017, "bucket": "0-10%", "epsGrowth": 6.983168018240438, "peChange": 11.62500335755241, "priceReturn": 19.41996489237683, "eps": 129.1274, "price": 2673.61, "pe": 20.70521051302822}, {"year": 2018, "bucket": ">20%", "epsGrowth": 23.929313220896574, "peChange": -24.34175754858866, "priceReturn": -6.237259734965095, "eps": 160.0267, "price": 2506.85, "pe": 15.665198370022}, {"year": 2019, "bucket": "0-10%", "epsGrowth": 2.817904762142809, "peChange": 25.345944731292946, "priceReturn": 28.87807407702896, "eps": 164.5361, "price": 3230.78, "pe": 19.63569089093518}, {"year": 2020, "bucket": "<0%", "epsGrowth": -13.942836860725393, "peChange": 35.0949970380926, "priceReturn": 16.25892199406953, "eps": 141.5951, "price": 3756.07, "pe": 26.526836027517902}, {"year": 2021, "bucket": ">20%", "epsGrowth": 41.308774103058646, "peChange": -10.201799501627274, "priceReturn": 26.8927362908572, "eps": 200.0863, "price": 4766.18, "pe": 23.820621401865097}, {"year": 2022, "bucket": "10-15%", "epsGrowth": 12.131665186472041, "peChange": -28.15840589397173, "priceReturn": -19.442824232404156, "eps": 224.3601, "price": 3839.5, "pe": 17.113114141061626}, {"year": 2023, "bucket": "<0%", "epsGrowth": -0.9030571835188073, "peChange": 25.36259467955908, "priceReturn": 24.230498762859742, "eps": 222.334, "price": 4769.83, "pe": 21.453443917709393}, {"year": 2024, "bucket": "0-10%", "epsGrowth": 7.6142200473162, "peChange": 14.584305648205786, "priceReturn": 23.309006819949563, "eps": 239.263, "price": 5881.63, "pe": 24.582279750734546}, {"year": 2025, "bucket": "10-15%", "epsGrowth": 12.52939234231787, "peChange": 3.4288034783515497, "priceReturn": 16.387804061119105, "eps": 269.2412, "price": 6845.5, "pe": 25.42515781388584}], "buckets": [{"label": "<0%", "n": 3, "medianPeChange": 25.36259467955908, "frequencyExpansion": 100.0, "years": [2015, 2020, 2023]}, {"label": "0-10%", "n": 6, "medianPeChange": 13.104654502879098, "frequencyExpansion": 100.0, "years": [2012, 2013, 2016, 2017, 2019, 2024]}, {"label": "10-15%", "n": 3, "medianPeChange": 1.1147914138831316, "frequencyExpansion": 66.66666666666666, "years": [2014, 2022, 2025]}, {"label": "15-20%", "n": 1, "medianPeChange": -15.765379099892218, "frequencyExpansion": 0.0, "years": [2011]}, {"label": ">20%", "n": 3, "medianPeChange": -22.576195080561522, "frequencyExpansion": 0.0, "years": [2010, 2018, 2021]}], "forecast": {"year": 2026, "epsEstimate": 337.309954370043, "baseYear": 2025, "baseEps": 269.2412, "epsGrowth": 25.281700709268495, "bucket": ">20%"}, "sampleStart": 2010, "sampleEnd": 2025, "sampleSize": 16, "source": {"eps": "FA1.xlsx", "market": "spxdata/FA1_sun3i1sn.xlsx", "epsCode": "T12_EPS_AGGTE", "priceCode": "PX_LAST"}, "generatedAt": "2026-08-25 15:52"};
+const fmtPct = (value, decimals = 1) => `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}%`;
+const fmtNum = (value, decimals = 1) => Number(value).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+const svgNS = 'http://www.w3.org/2000/svg';
+const tooltip = document.getElementById('tooltip');
+let activeBucket = 'All';
+
+function el(name, attrs = {}, text = '') {
+  const node = document.createElementNS(svgNS, name);
+  Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+  if (text !== '') node.textContent = text;
+  return node;
+}
+
+function showTip(event, html) {
+  tooltip.innerHTML = html;
+  tooltip.style.left = `${Math.min(window.innerWidth - 230, event.clientX + 14)}px`;
+  tooltip.style.top = `${Math.max(10, event.clientY + 14)}px`;
+  tooltip.classList.add('on');
+}
+function hideTip() {
+  tooltip.classList.remove('on');
+}
+
+function drawBucketChart() {
+  const svg = document.getElementById('bucketChart');
+  svg.innerHTML = '';
+  const W = 1040, H = 520;
+  const margin = { left: 78, right: 86, top: 34, bottom: 82 };
+  const plotW = W - margin.left - margin.right;
+  const plotH = H - margin.top - margin.bottom;
+  const peMin = -35, peMax = 40;
+  const freqMin = 0, freqMax = 100;
+  const yPe = v => margin.top + (peMax - v) / (peMax - peMin) * plotH;
+  const yFreq = v => margin.top + (freqMax - v) / (freqMax - freqMin) * plotH;
+  const xStep = plotW / DATA.buckets.length;
+  const barW = Math.min(108, xStep * .52);
+
+  [-30, -20, -10, 0, 10, 20, 30, 40].forEach(tick => {
+    const y = yPe(tick);
+    svg.appendChild(el('line', { x1: margin.left, x2: W - margin.right, y1: y, y2: y, class: tick === 0 ? 'zero-line' : 'grid-line' }));
+    svg.appendChild(el('text', { x: margin.left - 12, y: y + 4, 'text-anchor': 'end', class: 'axis' }, `${tick}%`));
+  });
+  [0, 20, 40, 60, 80, 100].forEach(tick => {
+    const y = yFreq(tick);
+    svg.appendChild(el('text', { x: W - margin.right + 14, y: y + 4, class: 'axis' }, `${tick}%`));
+  });
+  svg.appendChild(el('text', { x: 26, y: margin.top + plotH / 2, transform: `rotate(-90 26 ${margin.top + plotH / 2})`, 'text-anchor': 'middle', class: 'axis' }, 'P/E Change'));
+  svg.appendChild(el('text', { x: W - 20, y: margin.top + plotH / 2, transform: `rotate(90 ${W - 20} ${margin.top + plotH / 2})`, 'text-anchor': 'middle', class: 'axis' }, 'Frequency of P/E Expansion'));
+
+  DATA.buckets.forEach((bucket, i) => {
+    const x = margin.left + xStep * i + xStep / 2;
+    const value = bucket.medianPeChange;
+    const freq = bucket.frequencyExpansion;
+    if (bucket.label === DATA.forecast?.bucket) {
+      svg.appendChild(el('rect', {
+        x: x - xStep * .44,
+        y: margin.top + 5,
+        width: xStep * .88,
+        height: plotH - 10,
+        class: 'forecast-box'
+      }));
+      svg.appendChild(el('text', { x, y: margin.top + 25, 'text-anchor': 'middle', fill: 'var(--rust)', 'font-size': 13, 'font-weight': 760 }, '2026 Est'));
+    }
+    if (value !== null) {
+      const y0 = yPe(0);
+      const y1 = yPe(value);
+      const rect = el('rect', {
+        x: x - barW / 2,
+        y: Math.min(y0, y1),
+        width: barW,
+        height: Math.max(4, Math.abs(y0 - y1)),
+        rx: 2,
+        class: 'bar',
+        'data-bucket': bucket.label
+      });
+      rect.addEventListener('mousemove', e => showTip(e, `<strong>${bucket.label} EPS growth</strong><br>Median P/E change: ${fmtPct(value)}<br>Expansion frequency: ${freq === null ? 'N/A' : fmtPct(freq, 0)}<br>Years: ${bucket.years.join(', ') || 'None'}`));
+      rect.addEventListener('mouseleave', hideTip);
+      svg.appendChild(rect);
+      svg.appendChild(el('text', { x, y: value >= 0 ? y1 - 10 : y1 + 21, 'text-anchor': 'middle', fill: 'var(--ink)', 'font-size': 15, 'font-weight': 760 }, fmtPct(value, 0)));
+    }
+    if (freq !== null) {
+      const py = yFreq(freq);
+      const point = el('rect', {
+        x: x - 7,
+        y: py - 7,
+        width: 14,
+        height: 14,
+        class: 'point',
+        transform: `rotate(45 ${x} ${py})`
+      });
+      point.addEventListener('mousemove', e => showTip(e, `<strong>${bucket.label} EPS growth</strong><br>Expansion frequency: ${fmtPct(freq, 0)}<br>n = ${bucket.n}`));
+      point.addEventListener('mouseleave', hideTip);
+      svg.appendChild(point);
+      svg.appendChild(el('text', { x, y: py - 22, 'text-anchor': 'middle', fill: 'var(--green)', 'font-size': 15, 'font-weight': 760 }, fmtPct(freq, 0)));
+    }
+    svg.appendChild(el('text', { x, y: H - 42, 'text-anchor': 'middle', class: 'bucket-label', 'font-weight': 760 }, bucket.label));
+    svg.appendChild(el('text', { x, y: H - 23, 'text-anchor': 'middle', class: 'small-note' }, `n=${bucket.n}`));
+  });
+}
+
+function drawScatterChart() {
+  const svg = document.getElementById('scatterChart');
+  svg.innerHTML = '';
+  const W = 1040, H = 430;
+  const margin = { left: 78, right: 34, top: 32, bottom: 66 };
+  const plotW = W - margin.left - margin.right;
+  const plotH = H - margin.top - margin.bottom;
+  const xMin = -20, xMax = 50;
+  const yMin = -35, yMax = 40;
+  const xScale = v => margin.left + (v - xMin) / (xMax - xMin) * plotW;
+  const yScale = v => margin.top + (yMax - v) / (yMax - yMin) * plotH;
+  const colors = { '<0%': '#a6542a', '0-10%': '#163a5f', '10-15%': '#476c88', '15-20%': '#c29137', '>20%': '#5c7d32' };
+
+  [-20, -10, 0, 10, 20, 30, 40, 50].forEach(tick => {
+    const x = xScale(tick);
+    svg.appendChild(el('line', { x1: x, x2: x, y1: margin.top, y2: H - margin.bottom, class: tick === 0 ? 'zero-line' : 'grid-line' }));
+    svg.appendChild(el('text', { x, y: H - 32, 'text-anchor': 'middle', class: 'axis' }, `${tick}%`));
+  });
+  [-30, -20, -10, 0, 10, 20, 30, 40].forEach(tick => {
+    const y = yScale(tick);
+    svg.appendChild(el('line', { x1: margin.left, x2: W - margin.right, y1: y, y2: y, class: tick === 0 ? 'zero-line' : 'grid-line' }));
+    svg.appendChild(el('text', { x: margin.left - 12, y: y + 4, 'text-anchor': 'end', class: 'axis' }, `${tick}%`));
+  });
+  svg.appendChild(el('text', { x: margin.left + plotW / 2, y: H - 5, 'text-anchor': 'middle', class: 'axis' }, 'EPS Growth'));
+  svg.appendChild(el('text', { x: 25, y: margin.top + plotH / 2, transform: `rotate(-90 25 ${margin.top + plotH / 2})`, 'text-anchor': 'middle', class: 'axis' }, 'P/E Change'));
+
+  DATA.records.forEach(record => {
+    const x = xScale(record.epsGrowth);
+    const y = yScale(record.peChange);
+    const dot = el('circle', {
+      cx: x,
+      cy: y,
+      r: 7,
+      fill: colors[record.bucket],
+      stroke: '#fffdf8',
+      'stroke-width': 2,
+      'data-bucket': record.bucket
+    });
+    dot.addEventListener('mousemove', e => showTip(e, `<strong>${record.year}</strong><br>EPS growth: ${fmtPct(record.epsGrowth)}<br>P/E change: ${fmtPct(record.peChange)}<br>P/E: ${fmtNum(record.pe, 1)}x`));
+    dot.addEventListener('mouseleave', hideTip);
+    svg.appendChild(dot);
+    svg.appendChild(el('text', { x: x + 10, y: y - 9, fill: 'var(--muted)', 'font-size': 11 }, String(record.year)));
+  });
+}
+
+function renderFilters() {
+  const filters = document.getElementById('filters');
+  filters.innerHTML = '';
+  ['All', ...DATA.buckets.map(b => b.label)].forEach(label => {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.className = label === activeBucket ? 'active' : '';
+    btn.addEventListener('click', () => {
+      activeBucket = label;
+      renderFilters();
+      renderTable();
+    });
+    filters.appendChild(btn);
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('rows');
+  const rows = DATA.records
+    .filter(r => activeBucket === 'All' || r.bucket === activeBucket)
+    .sort((a, b) => b.year - a.year);
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.year}</td>
+      <td>${r.bucket}</td>
+      <td class="${r.epsGrowth >= 0 ? 'positive' : 'negative'}">${fmtPct(r.epsGrowth)}</td>
+      <td class="${r.peChange >= 0 ? 'positive' : 'negative'}">${fmtPct(r.peChange)}</td>
+      <td class="${r.priceReturn >= 0 ? 'positive' : 'negative'}">${fmtPct(r.priceReturn)}</td>
+      <td>${fmtNum(r.eps, 1)}</td>
+      <td>${fmtNum(r.price, 1)}</td>
+      <td>${fmtNum(r.pe, 1)}x</td>
+    </tr>
+  `).join('');
+}
+
+drawBucketChart();
+drawScatterChart();
+renderFilters();
+renderTable();
+</script>
+</body>
+</html>
