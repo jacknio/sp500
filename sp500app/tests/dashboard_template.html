@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>US Macro Monitor</title>
+  <style>
+    /* Layout only. Read the COMPOSITE MATH block below for interactive formulas. */
+    :root { --blue:#244b73; --ink:#1c232c; --muted:#646e7b; --line:#dce2e8; --navigation-height:100px; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:12px/1.55 Arial, sans-serif; color:var(--ink); background:#f7f8fa; }
+    main, .topline, .section-navigation { max-width:1520px; margin:auto; padding:0 28px; }
+    header { position:sticky; top:0; z-index:20; background:white; border-bottom:1px solid var(--line); }
+    .topline { display:flex; justify-content:space-between; align-items:center; min-height:48px; gap:16px; }
+    .brand { font-weight:700; letter-spacing:.8px; font-size:13px; }
+    .desk { margin-left:22px; font-size:10px; color:var(--muted); font-weight:400; }
+    .downloads { display:flex; flex-wrap:wrap; gap:8px; }
+    button { cursor:pointer; border:1px solid #cbd4df; background:white; color:var(--blue); border-radius:3px; padding:6px 10px; font:11px Arial,sans-serif; }
+    button:hover { border-color:var(--blue); background:#edf2f7; }
+    button:disabled { cursor:default; opacity:.45; }
+    button.primary { background:var(--blue); color:white; border-color:var(--blue); }
+    .builder-workspace { display:grid; grid-template-columns:minmax(245px,.75fr) minmax(0,1.65fr); gap:28px; }
+    .builder-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:10px 0; }
+    .builder-heading h3 { font-size:14px; }
+    .step-number { display:inline-grid; place-items:center; width:23px; height:23px; margin-right:8px; background:#e6edf4; color:var(--blue); border-radius:50%; font-size:12px; }
+    .builder-library { min-width:0; border-right:1px solid var(--line); padding-right:24px; }
+    #indicator-search { width:100%; padding:9px 10px; border:1px solid #cbd4df; border-radius:3px; background:white; font:12px Arial,sans-serif; }
+    #indicator-library { max-height:320px; overflow-y:auto; margin-top:6px; }
+    .indicator-option { display:flex; align-items:start; gap:9px; padding:9px 4px; border-bottom:1px solid #edf0f3; cursor:pointer; }
+    .indicator-option:hover { background:#edf2f7; }
+    .indicator-option input { accent-color:var(--blue); margin:3px 0 0; }
+    .indicator-option strong { display:block; font-size:12px; font-weight:500; }
+    .indicator-option small { display:block; font-size:10px; color:var(--muted); }
+    .library-filter { display:flex; align-items:center; gap:8px; margin:8px 0; color:var(--muted); }
+    #indicator-group { flex:1; min-width:0; padding:6px; border:1px solid #cbd4df; background:white; color:var(--ink); }
+    .monitor-card h3 { overflow-wrap:anywhere; }
+    [hidden] { display:none !important; }
+    .builder-selection { min-width:0; }
+    .selection-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:11px; }
+    .selection-toolbar select { padding:7px; background:white; border:1px solid #cbd4df; border-radius:3px; font:12px Arial,sans-serif; }
+    .component-row { display:grid; grid-template-columns:minmax(150px,1fr) 92px 146px 58px; gap:14px; align-items:center; padding:14px 0; border-bottom:1px solid var(--line); }
+    .component-name { font-size:12px; font-weight:600; }
+    .component-row small { display:block; font-size:10px; color:var(--muted); font-weight:400; }
+    .weight-entry { display:flex; gap:4px; align-items:center; }
+    .component-row input { width:68px; padding:7px 5px; font:13px Arial,sans-serif; border:1px solid #cbd4df; border-radius:3px; }
+    .component-row input:disabled { background:transparent; color:var(--ink); border-color:transparent; opacity:1; }
+    .component-row select { width:100%; padding:7px 3px; font:11px Arial,sans-serif; border:1px solid #cbd4df; border-radius:3px; background:white; }
+    [data-used-weight] { color:var(--blue) !important; font-weight:600 !important; }
+    .allocation-bar { display:flex; height:12px; gap:2px; background:#e7ebf0; margin:14px 0 7px; border-radius:2px; overflow:hidden; }
+    .allocation-segment { min-width:0; background:var(--blue); transition:width .16s ease; }
+    #weight-summary { font-size:11px; color:var(--muted); }
+    #builder-formula { font-size:12px; color:var(--blue); padding:10px 0; overflow-wrap:anywhere; }
+    .builder-options { border-top:1px solid var(--line); margin-top:18px; padding-top:6px; }
+    .builder-options .composite-controls { padding-top:0; }
+    .builder-options .composite-controls label { max-width:350px; }
+    .builder-options small { font-size:10px; color:var(--muted); }
+    .builder-empty { padding:22px 0; color:var(--muted); }
+    #builder-status { color:var(--muted); font-size:11px; }
+    button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+    .heading { display:flex; justify-content:space-between; align-items:baseline; padding:18px 0 8px; }
+    h1 { font-size:22px; margin:0; letter-spacing:-.4px; }
+    h2 { font-size:15px; margin:0 0 12px; }
+    h3 { font-size:13px; margin:0; font-weight:600; }
+    p { margin:6px 0; }
+    .subtitle, .asof, .source, .context, .chart-heading p { color:var(--muted); font-size:11px; }
+    .section-navigation { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; padding-top:7px; padding-bottom:9px; border-top:1px solid var(--line); }
+    .section-navigation label { font-size:11px; font-weight:600; color:var(--muted); }
+    #section-jump { min-width:200px; max-width:100%; padding:6px 28px 6px 9px; border:1px solid #cbd4df; border-radius:3px; background:white; color:var(--blue); font:12px Arial,sans-serif; }
+    .section-links { display:flex; flex-wrap:wrap; gap:6px 16px; }
+    .section-navigation.nav-ready .section-links { display:none; }
+    .navigation-note { color:var(--muted); font-size:11px; }
+    a { color:var(--blue); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    .notice { padding:10px 12px; margin:10px 0; color:#5e4e37; background:#f2eee7; font-size:11px; }
+    section { margin:24px 0; scroll-margin-top:calc(var(--navigation-height) + 14px); }
+    .section-heading { display:flex; justify-content:space-between; gap:16px; align-items:baseline; border-bottom:1px solid var(--line); margin-bottom:12px; }
+    .section-heading p { font-size:11px; color:var(--muted); }
+    .charts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px 24px; }
+    .chart-panel { min-width:0; padding:12px 0 14px; border-bottom:1px solid var(--line); }
+    .chart-panel.full { margin-top:0; }
+    .chart-heading { display:flex; gap:16px; justify-content:space-between; align-items:flex-start; margin-bottom:9px; }
+    .chart-heading>div:first-child { min-width:0; }
+    .chart-heading .downloads { flex-shrink:0; }
+    svg { display:block; width:100%; height:auto; font-family:Arial,sans-serif; background:white; }
+    .full>svg { max-height:365px; }
+    .readings { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; padding:12px 0; }
+    .readings span { display:block; font-size:10px; color:var(--muted); }
+    .readings strong { display:block; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; }
+    .readings small { display:block; font-size:10px; color:var(--muted); }
+    .method, .source, .context { font-size:11px; line-height:1.6; }
+    .method { color:#566372; }
+    .source { overflow-wrap:anywhere; }
+    .range-strip { margin:4px 0 8px; }
+    .composite-controls { display:flex; flex-wrap:wrap; align-items:end; gap:12px 18px; padding:12px 0; }
+    .composite-controls label { display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:11px; }
+    .composite-controls select { border:1px solid #cbd4df; border-radius:3px; padding:7px; background:white; color:var(--ink); font:12px Arial,sans-serif; }
+    .monitor-save-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--line); }
+    #monitor-name { width:310px; max-width:100%; padding:8px; border:1px solid #cbd4df; font:12px Arial,sans-serif; border-radius:3px; }
+    .collection-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; }
+    #monitors-file { width:190px; max-width:100%; font-size:11px; }
+    .monitor-card .chart-heading { align-items:baseline; }
+    .monitor-card .downloads { flex-wrap:wrap; }
+    .monitor-card .formula { color:var(--muted); font-size:10px; line-height:1.5; }
+    .monitor-card .missing { padding:16px 0; color:#765838; }
+    #monitors-status { min-height:16px; }
+    #composite-message { color:#7a4928; font-size:12px; }
+    #composite-chart:empty { min-height:50px; }
+    @media(max-width:1050px) {
+      .builder-workspace { grid-template-columns:1fr; gap:12px; }
+      .builder-library { padding-right:0; border-right:0; }
+      #indicator-library { max-height:210px; }
+    }
+    @media(max-width:800px) {
+      main,.topline,.section-navigation { padding-left:16px; padding-right:16px; }
+      .charts { grid-template-columns:1fr; }
+      .desk { display:none; }
+      .topline { flex-wrap:wrap; padding-top:10px; padding-bottom:10px; }
+      .heading,.section-heading { display:block; }
+      .chart-heading { flex-wrap:wrap; gap:6px; }
+      .readings { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .readings strong { font-size:12px; }
+      .chart-panel { padding-top:8px; }
+      .section-navigation { flex-wrap:nowrap; gap:10px; }
+      #section-jump { flex:1; min-width:0; }
+      .navigation-note { display:none; }
+      .builder-workspace { grid-template-columns:1fr; gap:12px; }
+      .builder-library { padding-right:0; border-right:0; }
+      #indicator-library { max-height:210px; }
+      .component-row { grid-template-columns:minmax(0,1fr) 95px; gap:8px; }
+      .component-row select { max-width:165px; }
+    }
+    @media(prefers-reduced-motion:reduce) { .allocation-segment { transition:none; } }
+    @media print { button,nav { display:none; } header { position:static; } body { background:white; } .chart-panel { break-inside:avoid; } }
+  </style>
+</head>
+<body>
+  <header id="report-header">
+    <div class="topline"><div class="brand">MACRO MONITOR <span class="desk">US EQUITY STRATEGY</span></div><span class="context">United States · __ASOF__</span></div>
+    <nav class="section-navigation" aria-label="Jump to section">
+      <label for="section-jump">Go to</label>
+      <select id="section-jump" aria-label="Jump to report section"><option value="">Choose a section</option></select>
+      <span class="navigation-note">All sections stay expanded</span>
+      <div class="section-links"><a href="#custom-composite">Customize</a><a href="#my-monitors">My monitors</a>__NAV__</div>
+    </nav>
+  </header>
+  <main>
+    <div class="heading"><div><h1>US Macro Monitor</h1><p class="subtitle">Expectations → Reality → Pricing</p></div><p class="asof">Report cutoff: __ASOF__ · observation dates shown on every chart</p></div>
+    __NOTICE__
+    <section id="custom-composite" aria-labelledby="composite-title">
+      <div class="section-heading"><h2 id="composite-title">Customize</h2><p>Choose inputs · Preview · Add to monitors</p></div>
+      <div class="builder-workspace">
+        <div class="builder-library">
+          <div class="builder-heading"><h3><span class="step-number">1</span>Choose indicators</h3><span id="indicator-count" class="context"></span></div>
+          <input id="indicator-search" type="search" placeholder="Search name, ticker or topic…" aria-label="Search indicators">
+          <label class="library-filter">Topic <select id="indicator-group" aria-label="Filter indicators by topic"><option value="">All topics</option></select></label>
+          <div id="indicator-library" aria-label="Available indicators"></div>
+          
+        </div>
+        <div class="builder-selection">
+          <div class="builder-heading"><h3><span class="step-number">2</span>Allocate weights</h3><button id="component-clear">Clear selection</button></div>
+          <div class="selection-toolbar"><label for="weight-mode">Weighting</label><select id="weight-mode"><option value="equal">Average · same share for each</option><option value="custom">Custom · enter your weights</option></select><span id="weight-mode-hint"></span></div>
+          <div id="component-rows" aria-label="Selected indicators and weights"></div>
+          <div id="allocation-bar" class="allocation-bar" aria-label="Weight allocation"></div>
+          <p id="weight-summary" aria-live="polite"></p>
+          <p id="builder-formula"></p>
+          
+        </div>
+      </div>
+      <div class="builder-options">
+        <div class="builder-heading"><h3><span class="step-number">3</span>Preview and add</h3></div>
+        <div class="composite-controls">
+          <label>How to compare the inputs<select id="scale-mode"><option value="standardized">Standardize · compare different units</option><option value="raw">Keep original chart values</option></select></label>
+          <label>How to match dates<select id="alignment-mode"><option value="monthly">Monthly · last value in each complete month</option><option value="exact">Same date · identical observation dates</option></select></label>
+          <button id="composite-generate" class="primary">Preview chart</button>
+        </div>
+        <p id="builder-status" role="status" aria-live="polite"></p>
+      </div>
+      <p id="composite-message" role="status" aria-live="polite"></p>
+      <div id="composite-chart"></div>
+      <div id="composite-readings" class="readings"></div>
+      <p id="composite-stat-method" class="method"></p>
+      <div class="monitor-save-row">
+        <label for="monitor-name">Monitor name</label><input id="monitor-name" placeholder="e.g. Labor + inflation Average" maxlength="100">
+        <button id="monitor-add" class="primary">Add to monitors</button><button id="monitor-new">New monitor</button><button id="monitor-cancel" hidden>Cancel edit</button>
+        <button id="preview-download">Download data</button>
+      </div>
+    </section>
+    <section id="my-monitors">
+      <div class="section-heading"><h2>My monitors <span id="monitor-count" class="context"></span></h2><div class="collection-actions"><button id="monitors-save">Save monitors</button><button id="monitors-undo" hidden>Undo</button><label for="monitors-file">Load monitors</label><input id="monitors-file" type="file" accept=".json,application/json"></div></div>
+      <p id="monitors-status" class="context" role="status" aria-live="polite"></p>
+      <div id="monitor-cards" class="charts"></div>
+    </section>
+    __CONTENT__
+  </main>
+  <script>
+    // Navigation only: keep the section selector available while scrolling.
+    // Links are the single section list; the selector never hides report content.
+    (() => {
+      const header = document.getElementById('report-header');
+      const navigation = header.querySelector('.section-navigation');
+      const selector = document.getElementById('section-jump');
+      const sections = [];
+      const seen = new Set();
+      navigation.querySelectorAll('.section-links a').forEach(link => {
+        const id = link.getAttribute('href').slice(1);
+        const section = document.getElementById(id);
+        if (!section || seen.has(id)) return;
+        seen.add(id);
+        sections.push(section);
+        selector.add(new Option(link.textContent.trim(), id));
+      });
+      // Active-section tracking follows document order, independent of menu order.
+      sections.sort((a, b) => a.compareDocumentPosition(b) & 4 ? -1 : 1);
+      navigation.classList.add('nav-ready');
+
+      function measureHeader() {
+        document.documentElement.style.setProperty('--navigation-height', header.offsetHeight + 'px');
+      }
+      measureHeader();
+      if (window.ResizeObserver) new ResizeObserver(measureHeader).observe(header);
+      else window.addEventListener('resize', measureHeader);
+
+      selector.addEventListener('change', () => {
+        const section = document.getElementById(selector.value);
+        if (section) section.scrollIntoView({block:'start', behavior:'auto'});
+      });
+      let updatePending = false;
+      function updateSelection() {
+        const boundary = header.getBoundingClientRect().bottom + 26;
+        let active = '';
+        sections.forEach(section => {
+          if (section.getBoundingClientRect().top <= boundary) active = section.id;
+        });
+        selector.value = active;
+        updatePending = false;
+      }
+      window.addEventListener('scroll', () => {
+        if (!updatePending) {
+          updatePending = true;
+          requestAnimationFrame(updateSelection);
+        }
+      }, {passive:true});
+      updateSelection();
+    })();
+  </script>
+  <script id="download-data" type="application/json">__DOWNLOADS__</script>
+  <script>
+    // Shared download helper. Composite calculations are isolated in the next script.
+    const downloads = JSON.parse(document.getElementById('download-data').textContent);
+    function saveFile(filename, contents, type) {
+      const url = URL.createObjectURL(new Blob([contents], {type: type}));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  </script>
+  <script id="chart-exports" type="application/json">__CHART_EXPORTS__</script>
+  <script>
+    // XLSX container: store XML parts without an external ZIP or Excel library.
+    function zipFiles(files) {
+      const encoder = new TextEncoder(), local = [], central = [];
+      let offset = 0;
+      function crc32(bytes) {
+        let crc = 0xffffffff;
+        for (const byte of bytes) {
+          crc ^= byte;
+          for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+        }
+        return (crc ^ 0xffffffff) >>> 0;
+      }
+      for (const [filename, content] of Object.entries(files)) {
+        const name = encoder.encode(filename), bytes = typeof content === 'string' ? encoder.encode(content) : content;
+        const checksum = crc32(bytes);
+        const entry = new Uint8Array(30 + name.length), header = new DataView(entry.buffer);
+        header.setUint32(0, 0x04034b50, true); header.setUint16(4, 20, true);
+        header.setUint16(6, 0x0800, true); header.setUint16(12, 33, true);
+        header.setUint32(14, checksum, true); header.setUint32(18, bytes.length, true); header.setUint32(22, bytes.length, true);
+        header.setUint16(26, name.length, true); entry.set(name, 30);
+        const directory = new Uint8Array(46 + name.length), record = new DataView(directory.buffer);
+        record.setUint32(0, 0x02014b50, true); record.setUint16(4, 20, true); record.setUint16(6, 20, true);
+        record.setUint16(8, 0x0800, true); record.setUint16(14, 33, true);
+        record.setUint32(16, checksum, true); record.setUint32(20, bytes.length, true); record.setUint32(24, bytes.length, true);
+        record.setUint16(28, name.length, true); record.setUint32(42, offset, true); directory.set(name, 46);
+        local.push(entry, bytes); central.push(directory); offset += entry.length + bytes.length;
+      }
+      const end = new Uint8Array(22), summary = new DataView(end.buffer);
+      summary.setUint32(0, 0x06054b50, true); summary.setUint16(8, central.length, true); summary.setUint16(10, central.length, true);
+      summary.setUint32(12, central.reduce((sum, entry) => sum + entry.length, 0), true); summary.setUint32(16, offset, true);
+      return new Blob([...local, ...central, end], {type:'application/zip'});
+    }
+    // Excel export is presentation only; none of these functions change calculations.
+    // Native XLSX = SpreadsheetML XML parts in a ZIP container, built fully offline.
+    // Format reference: https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/structure-of-a-spreadsheetml-document
+    function base64Bytes(value) { return Uint8Array.from(atob(value), character => character.charCodeAt(0)); }
+    function readCsvTable(text) {
+      // Read our saved CSV, including quoted commas, quotes and embedded newlines.
+      const rows = []; let row = [], field = '', quoted = false;
+      text = text.replace(/^\uFEFF/, '');
+      for (let i = 0; i < text.length; i++) {
+        const character = text[i];
+        if (character === '"') {
+          if (quoted && text[i + 1] === '"') { field += '"'; i++; }
+          else quoted = !quoted;
+        } else if (!quoted && character === ',') { row.push(field); field = ''; }
+        else if (!quoted && (character === '\n' || character === '\r')) {
+          if (character === '\r' && text[i + 1] === '\n') i++;
+          row.push(field); rows.push(row); row = []; field = '';
+        } else field += character;
+      }
+      if (field || row.length) { row.push(field); rows.push(row); }
+      if (!rows.length) return [];
+      const numeric = new Set(['value','count','min','p10','median','p90','max','percentile','zscore','change',
+        'change_percentile','z','history_count','history_mean','history_sd','original_value']);
+      return [rows[0], ...rows.slice(1).map(values => values.map((value, i) => {
+        if (value === '') return null;
+        if (numeric.has(rows[0][i]) && /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(value) && Number.isFinite(Number(value))) return Number(value);
+        if (rows[0][i] === 'sufficient' && /^(true|false)$/i.test(value)) return value.toLowerCase() === 'true';
+        return value;
+      }))];
+    }
+    function excelWorkbook(sheets) {
+      const xml = value => String(value).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').replace(/[&<>"']/g,
+        character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[character]));
+      const declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+      const main = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+      const relationship = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+      const packageRelationship = 'http://schemas.openxmlformats.org/package/2006/relationships';
+      const contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.';
+      function columnName(index) {
+        let name = '';
+        for (index++; index > 0; index = Math.floor((index - 1) / 26)) name = String.fromCharCode(65 + (index - 1) % 26) + name;
+        return name;
+      }
+      const files = {}, overrides = [], sheetLinks = [], sheetNames = [];
+      sheets.forEach((sheet, index) => {
+        const rows = sheet.rows, width = rows.reduce((maximum, row) => Math.max(maximum, row.length), 1);
+        if (rows.length > 1048576 || width > 16384) throw new Error('This chart exceeds Excel worksheet limits.');
+        const range = 'A1:' + columnName(width - 1) + Math.max(1, rows.length);
+        const body = rows.map((row, r) => '<row r="' + (r + 1) + '">' + row.map((value, c) => {
+          if (value === null || value === undefined || value === '') return '';
+          const ref = ' r="' + columnName(c) + (r + 1) + '"' + (r === 0 ? ' s="1"' : '');
+          if (typeof value === 'number') return Number.isFinite(value) ? '<c' + ref + '><v>' + value + '</v></c>' : '';
+          if (typeof value === 'boolean') return '<c' + ref + ' t="b"><v>' + Number(value) + '</v></c>';
+          // Always literal text: labels/formulas starting with '=' are never Excel formulas.
+          if (String(value).length > 32767) throw new Error('A text cell exceeds the Excel character limit.');
+          return '<c' + ref + ' t="inlineStr"><is><t xml:space="preserve">' + xml(value) + '</t></is></c>';
+        }).join('') + '</row>').join('');
+        const columns = Array.from({length:width}, (_, c) => '<col min="' + (c + 1) + '" max="' + (c + 1)
+          + '" width="' + Math.min(46, Math.max(14, String(rows[0]?.[c] || '').length + 3)) + '" customWidth="1"/>').join('');
+        files['xl/worksheets/sheet' + (index + 1) + '.xml'] = declaration + '<worksheet xmlns="' + main + '">'
+          + '<dimension ref="' + range + '"/><sheetViews><sheetView workbookViewId="0">'
+          + '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+          + '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>'
+          + '<sheetFormatPr defaultRowHeight="15"/><cols>' + columns + '</cols><sheetData>' + body
+          + '</sheetData><autoFilter ref="' + range + '"/></worksheet>';
+        overrides.push('<Override PartName="/xl/worksheets/sheet' + (index + 1) + '.xml" ContentType="' + contentType + 'worksheet+xml"/>');
+        sheetLinks.push('<Relationship Id="rId' + (index + 1) + '" Type="' + relationship + '/worksheet" Target="worksheets/sheet' + (index + 1) + '.xml"/>');
+        sheetNames.push('<sheet name="' + xml(sheet.name) + '" sheetId="' + (index + 1) + '" r:id="rId' + (index + 1) + '"/>');
+      });
+      files['[Content_Types].xml'] = declaration + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        + '<Default Extension="xml" ContentType="application/xml"/>'
+        + '<Override PartName="/xl/workbook.xml" ContentType="' + contentType + 'sheet.main+xml"/>'
+        + '<Override PartName="/xl/styles.xml" ContentType="' + contentType + 'styles+xml"/>' + overrides.join('') + '</Types>';
+      files['_rels/.rels'] = declaration + '<Relationships xmlns="' + packageRelationship + '">'
+        + '<Relationship Id="rId1" Type="' + relationship + '/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+      files['xl/workbook.xml'] = declaration + '<workbook xmlns="' + main + '" xmlns:r="' + relationship + '"><sheets>' + sheetNames.join('') + '</sheets></workbook>';
+      files['xl/_rels/workbook.xml.rels'] = declaration + '<Relationships xmlns="' + packageRelationship + '">' + sheetLinks.join('')
+        + '<Relationship Id="rIdStyles" Type="' + relationship + '/styles" Target="styles.xml"/></Relationships>';
+      files['xl/styles.xml'] = declaration + '<styleSheet xmlns="' + main + '">'
+        + '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts>'
+        + '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF244B73"/><bgColor indexed="64"/></patternFill></fill></fills>'
+        + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        + '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>'
+        + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+      return zipFiles(files);
+    }
+    function saveExcel(name, sheets) {
+      const filename = 'macro_' + name.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80) + '.xlsx';
+      saveFile(filename, excelWorkbook(sheets), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }
+    const chartExports = JSON.parse(document.getElementById('chart-exports').textContent);
+    document.querySelectorAll('[data-chart-download]').forEach(button => button.addEventListener('click', () => {
+      const item = chartExports[button.dataset.chartDownload];
+      const names = {'chart_data.csv':'Chart data','raw_data.csv':'Raw data','statistics.csv':'Statistics'};
+      saveExcel(item.title, Object.entries(item.files).map(([filename, value]) => ({name:names[filename],
+        rows:readCsvTable(new TextDecoder().decode(base64Bytes(value)))})));
+    }));
+  </script>
+  <script id="composite-data" type="application/json">__COMPOSITE_DATA__</script>
+  <script>
+    // =====================================================================
+    // A. COMPOSITE INPUTS — Python already transformed and standardized these.
+    // No network requests, CSV fetching, packages, or server are used here.
+    // =====================================================================
+    const compositePayload = JSON.parse(document.getElementById('composite-data').textContent);
+    const historyYears = compositePayload.history_years;
+    const minimumObservations = compositePayload.minimum_observations;
+    const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+    const compositeSeries = Object.fromEntries(Object.entries(compositePayload.series).map(([id, series]) => [id, {
+      ...series,
+      rows: series.rows.map(row => Object.fromEntries(compositePayload.columns.map((column, i) => [column, row[i]])))
+    }]));
+    const element = id => document.getElementById(id);
+    const isNumber = value => typeof value === 'number' && Number.isFinite(value);
+    const displayNumber = value => isNumber(value) ? value.toFixed(2) : '—';
+    const safeText = value => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+
+    // =====================================================================
+    // B. COMPOSITE MATH — review these functions before the drawing code.
+    // They are pure calculations: no HTML access or changes to source data.
+    // =====================================================================
+    function calendarYearsBefore(day, years) {
+      const [year, month, date] = day.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(year - years, month, 0)).getUTCDate();
+      return `${year - years}-${String(month).padStart(2, '0')}-${String(Math.min(date, lastDay)).padStart(2, '0')}`;
+    }
+    function compositeQuantile(values, probability) {
+      if (!values.length) return null;
+      const ordered = [...values].sort((a, b) => a - b);
+      const position = (ordered.length - 1) * probability;
+      const lower = Math.floor(position), upper = Math.ceil(position);
+      return ordered[lower] + (position - lower) * (ordered[upper] - ordered[lower]);
+    }
+    function resolveCompositeWeights(recipe, inputs = compositeSeries) {
+      if (!recipe || !['equal', 'custom'].includes(recipe.weightMode) || !['raw', 'standardized'].includes(recipe.scale) || !['exact', 'monthly'].includes(recipe.alignment)) {
+        throw new Error('Choose a valid weight, scale and alignment mode.');
+      }
+      if (!Array.isArray(recipe.components) || !recipe.components.length) throw new Error('Add at least one loaded indicator.');
+      const seen = new Set();
+      const components = recipe.components.map(component => {
+        if (!component || typeof component.id !== 'string') throw new Error('Unknown indicator.');
+        if (!hasOwn(inputs, component.id)) {
+          const definition = hasOwn(compositePayload.known_series, component.id) ? compositePayload.known_series[component.id] : null;
+          throw new Error(definition ? 'Data not loaded: ' + definition.name : 'Unknown indicator: ' + component.id);
+        }
+        const series = inputs[component.id];
+        if (!series || seen.has(component.id)) throw new Error('Unknown or duplicate indicator: ' + component.id);
+        seen.add(component.id);
+        const weight = recipe.weightMode === 'equal' ? 1 : component.weight;
+        if (!isNumber(weight) || weight < 0) throw new Error('Weights must be finite numbers of zero or above.');
+        if (![1, -1].includes(component.direction)) throw new Error('Direction must be +1 or −1.');
+        return {...component, enteredWeight:weight, series};
+      });
+      const total = components.reduce((sum, component) => sum + component.enteredWeight, 0);
+      if (total <= 0 || !Number.isFinite(total)) throw new Error('At least one positive weight is required; the total must be finite.');
+      components.forEach(component => component.weight = component.enteredWeight / total);
+      return components;
+    }
+    function calculateComposite(recipe, inputs = compositeSeries, cutoff = compositePayload.asof) {
+      // A known indicator missing from this week's download may remain in a
+      // saved recipe at zero weight. Keep its columns; it cannot block the chart.
+      const available = {...inputs};
+      for (const component of (recipe?.components || [])) {
+        if (recipe.weightMode === 'custom' && component?.weight === 0 && !hasOwn(available, component.id)
+            && hasOwn(compositePayload.known_series, component.id)) {
+          available[component.id] = {id:component.id,name:compositePayload.known_series[component.id].name,
+            unit:'',original_unit:'',transformation:'Data not loaded (zero weight)',frequency:null,rows:[],raw_ids:[]};
+        }
+      }
+      const components = resolveCompositeWeights(recipe, available);
+      const active = components.filter(component => component.weight > 0);
+      const units = new Set(active.map(component => component.series.unit.toLowerCase().replace(/^percent$/, '%')));
+      const transforms = new Set(active.map(component => component.series.transformation));
+      if (recipe.scale === 'raw' && (units.size > 1 || transforms.size > 1)) {
+        throw new Error('Original values have different units or transformations. Choose Standardized values, or select comparable inputs.');
+      }
+      const frequencies = new Set(active.map(component => component.series.frequency));
+      if (recipe.alignment === 'exact' && frequencies.size > 1) {
+        throw new Error('Exact dates require the same native frequency. Choose Completed calendar months for mixed-frequency inputs.');
+      }
+      if (recipe.alignment === 'monthly' && frequencies.has('Quarterly')) {
+        throw new Error('Quarterly inputs require exact common dates with other quarterly series. They are not filled into months.');
+      }
+      // Monthly selection retains the last original observation, even when its
+      // z-score is unavailable. We never replace it with an earlier valid z-score.
+      const mapped = components.map(component => {
+        const lookup = new Map();
+        component.series.rows.forEach(row => {
+          if (row.date > cutoff) return;
+          if (recipe.alignment === 'monthly' && row.date.slice(0, 7) >= cutoff.slice(0, 7)) return;
+          const day = recipe.alignment === 'monthly' ? row.date.slice(0, 7) + '-01' : row.date;
+          // Choose by date, even if imported/native rows are not already sorted.
+          if (!lookup.has(day) || lookup.get(day).date <= row.date) lookup.set(day, row);
+        });
+        return lookup;
+      });
+      // Zero-weight selections appear in downloads, but cannot add dates or
+      // constrain the complete sample used by positive-weight components.
+      const allDates = [...new Set(mapped.flatMap((lookup, i) => components[i].weight > 0 ? [...lookup.keys()] : []))].sort();
+      const points = allDates.map(day => {
+        const parts = components.map((component, i) => {
+          const row = mapped[i].get(day);
+          const input = row ? row[recipe.scale === 'raw' ? 'value' : 'z'] : null;
+          return {id:component.id, sourceDate:row?.date ?? null, original:row?.original_value ?? null,
+            raw:row?.value ?? null, input,
+            contribution:component.weight === 0 ? 0 : isNumber(input) ? component.weight * component.direction * input : null};
+        });
+        const complete = parts.every(part => isNumber(part.contribution));
+        const value = complete ? parts.reduce((sum, part) => sum + part.contribution, 0) : null;
+        if (value !== null && !Number.isFinite(value)) throw new Error('Composite overflow: check input values and weights.');
+        return {date:day, value, parts};
+      });
+      return {points, components, unit:recipe.scale === 'raw' ? active[0].series.unit : 'weighted z-score',
+        frequency:recipe.alignment === 'monthly' ? 'Monthly' : active[0].series.frequency};
+    }
+    function compositeChange(valid, frequency, horizon) {
+      const latest = valid[valid.length - 1];
+      const currentDate = new Date(latest.date + 'T00:00:00Z');
+      let target;
+      if (frequency === 'Monthly' || frequency === 'Quarterly') {
+        const months = horizon * (frequency === 'Quarterly' ? 3 : 1);
+        const lastCurrent = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 1, 0)).getUTCDate();
+        const lastTarget = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() - months + 1, 0)).getUTCDate();
+        const day = currentDate.getUTCDate() === lastCurrent ? lastTarget : Math.min(currentDate.getUTCDate(), lastTarget);
+        target = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() - months, day));
+      } else {
+        target = new Date(currentDate.getTime() - horizon * 7 * 86400000);
+      }
+      const targetDay = target.toISOString().slice(0, 10);
+      const base = [...valid].reverse().find(point => point.date <= targetDay);
+      const tolerance = frequency === 'Daily' ? 4 : 0;
+      const gap = base ? (target - new Date(base.date + 'T00:00:00Z')) / 86400000 : Infinity;
+      return base && gap <= tolerance ? {value:latest.value - base.value, base:base.date} : {value:null, base:null};
+    }
+    function compositeStatistics(result) {
+      const valid = result.points.filter(point => isNumber(point.value));
+      if (!valid.length) return null;
+      const latest = valid[valid.length - 1];
+      const start = calendarYearsBefore(latest.date, historyYears);
+      const sample = valid.filter(point => point.date >= start);
+      const values = sample.map(point => point.value);
+      const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+      const sd = values.length > 1 ? Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1)) : null;
+      if (!Number.isFinite(mean) || (sd !== null && !Number.isFinite(sd))) throw new Error('Statistics overflow: check input scale and values.');
+      const history = sample.slice(0, -1).map(point => point.value);
+      const minimum = minimumObservations[result.frequency];
+      const sufficient = history.length >= minimum;
+      const horizons = result.frequency === 'Monthly' ? [1, 3, 12] : result.frequency === 'Quarterly' ? [1, 2, 4] : [1, 4, 13];
+      const suffix = result.frequency === 'Monthly' ? 'M' : result.frequency === 'Quarterly' ? 'Q' : 'W';
+      return {date:latest.date, value:latest.value, latest, start, sampleStart:sample[0].date,
+        count:values.length, mean, sd, min:Math.min(...values), max:Math.max(...values), historyCount:history.length,
+        historyStart:sample.length > 1 ? sample[0].date : null, historyEnd:sample.length > 1 ? sample[sample.length - 2].date : null,
+        p10:sufficient ? compositeQuantile(history, .1) : null, median:sufficient ? compositeQuantile(history, .5) : null,
+        p90:sufficient ? compositeQuantile(history, .9) : null,
+        percentile:sufficient ? 100 * (history.filter(value => value < latest.value).length + .5 * history.filter(value => value === latest.value).length) / history.length : null,
+        changes:horizons.map(horizon => ({label:horizon + suffix, ...compositeChange(valid, result.frequency, horizon)}))};
+    }
+
+    // =====================================================================
+    // C. CHART — presentation only. Math above also feeds the Excel download.
+    // =====================================================================
+    function drawComposite(result, stats) {
+      const width = 1080, height = 285, left = 70, right = 20, top = 28, bottom = 35;
+      const sample = result.points.filter(point => point.date >= stats.start && point.date <= stats.date);
+      const values = sample.filter(point => isNumber(point.value)).map(point => point.value);
+      let low = Math.min(...values), high = Math.max(...values);
+      const pad = (high - low || Math.abs(high) || 1) * .12;
+      low -= pad; high += pad;
+      const firstTime = Date.parse(stats.start), lastTime = Date.parse(stats.date);
+      const x = day => left + (Date.parse(day) - firstTime) / (lastTime - firstTime || 1) * (width - left - right);
+      const y = value => height - bottom - (value - low) / (high - low) * (height - top - bottom);
+      const text = (px, py, label, anchor = 'start', fill = '#646e7b') => `<text x="${px}" y="${py}" text-anchor="${anchor}" fill="${fill}" font-size="12">${safeText(label)}</text>`;
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Custom composite time series and prior historical range" style="font-family:Arial,sans-serif;background:white">`;
+      if (stats.p10 !== null) {
+        svg += `<rect x="${left}" y="${y(stats.p90)}" width="${width-left-right}" height="${y(stats.p10)-y(stats.p90)}" fill="#e8eef4"/>`;
+        svg += `<line x1="${left}" x2="${width-right}" y1="${y(stats.median)}" y2="${y(stats.median)}" stroke="#98a9ba" stroke-dasharray="5 4"/>`;
+      }
+      for (let i = 0; i <= 4; i++) {
+        const value = low + (high - low) * i / 4;
+        svg += `<line x1="${left}" x2="${width-right}" y1="${y(value)}" y2="${y(value)}" stroke="#e5e9ee"/>` + text(left - 8, y(value) + 4, displayNumber(value), 'end');
+      }
+      let path = '', connected = false, previousDate = null;
+      sample.forEach(point => {
+        if (!isNumber(point.value)) { connected = false; previousDate = null; return; }
+        // Leave a visible gap if an entire month/week is missing from all inputs.
+        if (previousDate) {
+          const gapDays = (Date.parse(point.date) - Date.parse(previousDate)) / 86400000;
+          const gapLimit = {Daily:7, Weekly:8, Monthly:32, Quarterly:93}[result.frequency];
+          if (gapDays > gapLimit) connected = false;
+        }
+        path += `${connected ? 'L' : 'M'}${x(point.date).toFixed(2)},${y(point.value).toFixed(2)} `;
+        connected = true; previousDate = point.date;
+      });
+      svg += `<path d="${path}" fill="none" stroke="#244b73" stroke-width="2.3"/><circle cx="${x(stats.date)}" cy="${y(stats.value)}" r="3.8" fill="#244b73"/>`;
+      for (let year = Number(stats.start.slice(0, 4)) + 1; year <= Number(stats.date.slice(0, 4)); year += 2) {
+        svg += text(x(year + '-01-01'), height - 10, year, 'middle');
+      }
+      svg += text(left, 17, result.unit + (stats.p10 === null ? ' · insufficient prior history for band' : ' · prior P10–P90 shaded; median dashed'));
+      return svg + '</svg>';
+    }
+
+    // =====================================================================
+    // D. BUILDER AND MONITORS — recipes stay separate from calculated results.
+    // Every chart download receives its own recipe, never the builder's draft.
+    // =====================================================================
+    let selectedComponents = [], currentComposite = null, currentCompositeStats = null, currentCompositeRecipe = null;
+    let savedMonitors = [], editingMonitorId = null, monitorSequence = 0;
+    let collectionUndo = null, alignmentManuallyChosen = false;
+    const monitorResults = new Map();
+    const knownSeries = Object.assign(Object.create(null), compositePayload.known_series || compositeSeries);
+    const storageKey = 'us-macro-monitors-v2:' + location.pathname;
+    const defaultRecipe = {version:1, weightMode:'equal', scale:'raw', alignment:'exact', components:[
+      {id:'SURPRISE_EMPLOYMENT', weight:1, direction:1}, {id:'SURPRISE_INFLATION', weight:1, direction:1}]};
+    const clone = value => JSON.parse(JSON.stringify(value));
+
+    function readCompositeRecipe() {
+      const mode = element('weight-mode').value;
+      return {version:1, weightMode:mode, scale:element('scale-mode').value,
+        alignment:element('alignment-mode').value, components:selectedComponents.map(component => ({...component, weight:mode === 'equal' ? 1 : component.weight}))};
+    }
+    function renderIndicatorLibrary() {
+      const query = element('indicator-search').value.trim().toLowerCase();
+      const group = element('indicator-group').value;
+      const selected = new Set(selectedComponents.map(component => component.id));
+      const available = Object.values(compositeSeries).filter(series =>
+        (!group || series.group === group) && [series.name,series.id,series.group,series.source,series.security,series.field].join(' ').toLowerCase().includes(query));
+      element('indicator-count').textContent = selected.size + ' selected';
+      element('indicator-library').innerHTML = available.length ? available.map(series =>
+        `<label class="indicator-option"><input type="checkbox" data-select-indicator="${safeText(series.id)}" aria-label="Select ${safeText(series.name)}" ${selected.has(series.id) ? 'checked' : ''}><span><strong>${safeText(series.name)}</strong><small>${safeText(series.group)} · ${safeText(series.frequency)} · ${safeText(series.id)}</small></span></label>`
+      ).join('') : '<p class="builder-empty">No matching loaded indicators.</p>';
+    }
+    function renderComponentRows() {
+      const equal = element('weight-mode').value === 'equal';
+      element('weight-mode-hint').textContent = equal ? 'Same share for each.' : 'Weights normalize to 100%.';
+      element('component-rows').innerHTML = selectedComponents.length ? selectedComponents.map(component => {
+        const series = compositeSeries[component.id] || {name:knownSeries[component.id]?.name || component.id, id:component.id, transformation:'Data not loaded', unit:''};
+        const weight = equal ? (100 / selectedComponents.length).toFixed(2) : isNumber(component.weight) ? component.weight : '';
+        return `<div class="component-row" data-component="${safeText(component.id)}">
+          <div class="component-name">${safeText(series.name)}<small>${safeText(series.transformation)} · ${safeText(series.unit)} · ${safeText(series.frequency || 'unavailable')}</small></div>
+          <label><small>${equal ? 'Share' : 'Weight'}</small><span class="weight-entry"><input type="number" min="0" step="any" aria-label="Weight for ${safeText(series.name)}" data-weight="${safeText(component.id)}" value="${weight}" ${equal ? 'disabled' : ''}>${equal ? '%' : ''}</span><small data-used-weight></small></label>
+          <label><small>Direction</small><select aria-label="Direction for ${safeText(series.name)}" data-direction="${safeText(component.id)}"><option value="1" ${component.direction === 1 ? 'selected' : ''}>As reported (+)</option><option value="-1" ${component.direction === -1 ? 'selected' : ''}>Reverse sign (−)</option></select></label>
+          <button data-remove="${safeText(component.id)}" aria-label="Remove ${safeText(series.name)}">Remove</button></div>`;
+      }).join('') : '<p class="builder-empty">Choose indicators to start.</p>';
+    }
+    function compositeFormula(components, recipe) {
+      return (recipe.weightMode === 'equal' ? 'Average = ' : 'Composite = ') + components.filter(component => component.weight > 0).map(component =>
+        `${(100 * component.weight).toFixed(1)}% × (${component.direction > 0 ? '+' : '−'}${component.series.name}${recipe.scale === 'standardized' ? ' z' : ''})`).join(' + ');
+    }
+    function previewCompositeWeights() {
+      element('allocation-bar').innerHTML = '';
+      element('builder-formula').textContent = '';
+      document.querySelectorAll('[data-used-weight]').forEach(cell => cell.textContent = '');
+      try {
+        const recipe = readCompositeRecipe(), components = resolveCompositeWeights(recipe, knownSeries);
+        components.forEach(component => {
+          const row = [...element('component-rows').children].find(row => row.dataset.component === component.id);
+          row.querySelector('[data-used-weight]').textContent = 'Used: ' + (100 * component.weight).toFixed(2) + '%';
+        });
+        element('allocation-bar').innerHTML = components.map((component, index) =>
+          `<div class="allocation-segment" style="width:${component.weight * 100}%;opacity:${1 - (index % 4) * .18}" title="${safeText(component.series.name)}: ${(component.weight * 100).toFixed(2)}%"></div>`).join('');
+        element('weight-summary').textContent = components.length + ' inputs · used total 100%';
+        element('builder-formula').textContent = compositeFormula(components, recipe);
+      } catch (error) { element('weight-summary').textContent = selectedComponents.length ? error.message : ''; }
+    }
+    function compactBand(stats) {
+      return stats.p10 === null ? `${stats.historyCount} prior observations · insufficient history for band`
+        : `Prior P10–P90: ${displayNumber(stats.p10)} to ${displayNumber(stats.p90)} · ${stats.historyStart}–${stats.historyEnd} · n=${stats.historyCount}`;
+    }
+    function readingsHtml(stats) {
+      const middle = stats.changes[1];
+      const readings = [['Latest',displayNumber(stats.value)], [middle.label + ' Δ',displayNumber(middle.value)],
+        ['Mean / SD',displayNumber(stats.mean) + ' / ' + displayNumber(stats.sd)],
+        ['Historical percentile',stats.percentile === null ? '—' : displayNumber(stats.percentile) + '%']];
+      return readings.map(([label,value]) => `<div><span>${safeText(label)}</span><strong>${safeText(value)}</strong></div>`).join('');
+    }
+    function markCompositePending() {
+      currentComposite = currentCompositeStats = currentCompositeRecipe = null;
+      ['composite-chart','composite-readings','composite-stat-method','composite-message'].forEach(id => element(id).textContent = '');
+      ['preview-download','monitor-add'].forEach(id => element(id).disabled = true);
+      previewCompositeWeights();
+      element('composite-generate').disabled = !selectedComponents.length;
+      element('builder-status').textContent = selectedComponents.length ? 'Preview to apply changes.' : 'Choose indicators to start.';
+    }
+    function updateComposite() {
+      markCompositePending();
+      try {
+        const recipe = readCompositeRecipe(), result = calculateComposite(recipe), stats = compositeStatistics(result);
+        if (!stats) throw new Error('No complete common observations. Check inputs and dates.');
+        currentComposite = result; currentCompositeStats = stats; currentCompositeRecipe = clone(recipe);
+        element('composite-chart').innerHTML = drawComposite(result, stats);
+        element('composite-readings').innerHTML = readingsHtml(stats);
+        element('composite-stat-method').textContent = `${result.unit} · ${stats.date} · ${compactBand(stats)}`;
+        ['preview-download','monitor-add'].forEach(id => element(id).disabled = false);
+        element('builder-status').textContent = editingMonitorId ? 'Preview ready · update this monitor.' : 'Preview ready · name and add below.';
+      } catch (error) { element('composite-message').textContent = error.message; }
+    }
+    function setBuilder(recipe, name = '', monitorId = null) {
+      selectedComponents = clone(recipe.components);
+      element('weight-mode').value = recipe.weightMode; element('scale-mode').value = recipe.scale; element('alignment-mode').value = recipe.alignment;
+      element('monitor-name').value = name; editingMonitorId = monitorId;
+      alignmentManuallyChosen = true;
+      element('indicator-search').value = ''; element('indicator-group').value = '';
+      element('monitor-cancel').hidden = !monitorId;
+      element('monitor-add').textContent = monitorId ? 'Update monitor' : 'Add to monitors';
+      renderIndicatorLibrary(); renderComponentRows(); markCompositePending();
+    }
+    // One workbook for this chart only; calculations stay in section B above.
+    function compositeExportSheets(name, result, stats, recipe) {
+      const fields = ['original_value','original_unit','chart_value','chart_unit','input_value','normalized_weight','direction','contribution','source_date','transformation'];
+      const headers = ['date','composite','composite_unit','complete','in_chart_window','scale','alignment',
+        ...result.components.flatMap(component => fields.map(field => component.id + '__' + field))];
+      const rows = result.points.map(point => [point.date,point.value,result.unit,isNumber(point.value),
+        point.date >= stats.start && point.date <= stats.date,recipe.scale,recipe.alignment,
+        ...point.parts.flatMap((part,i) => {
+          const component = result.components[i];
+          return [part.original,component.series.original_unit,part.raw,component.series.unit,part.input,
+            component.weight,component.direction,part.contribution,part.sourceDate,component.series.transformation];
+        })]);
+      // Source CSVs retain native dates and standardization warm-up observations.
+      const rawIds = [...new Set(result.components.flatMap(component => component.series.raw_ids))].sort();
+      const rawRows = [];
+      for (const id of rawIds) {
+        const table = readCsvTable(new TextDecoder().decode(base64Bytes(downloads['raw_' + id])));
+        for (const row of (rawRows.length ? table.slice(1) : table)) rawRows.push(row);
+      }
+      const statistics = Object.entries(stats).filter(([,value]) => value === null || typeof value !== 'object');
+      stats.changes.forEach(change => statistics.push([change.label + '_change',change.value],[change.label + '_base',change.base]));
+      statistics.push(['name',name],['report_cutoff',compositePayload.asof],['unit',result.unit],['frequency',result.frequency],['formula',compositeFormula(result.components,recipe)]);
+      const inputRows = result.components.flatMap(component => component.series.rows.map(row =>
+        [component.id,...compositePayload.columns.map(column => row[column])]));
+      const settings = [['setting','series_id','value'],['name','',name],['report_cutoff','',compositePayload.asof],
+        ['weight_mode','',recipe.weightMode === 'equal' ? 'Average' : 'Custom'],['scale','',recipe.scale],
+        ['alignment','',recipe.alignment],['formula','',compositeFormula(result.components,recipe)]];
+      result.components.forEach(component => {
+        for (const [field,value] of Object.entries({input_name:component.series.name,entered_weight:component.enteredWeight,
+          normalized_weight:component.weight,direction:component.direction,unit:component.series.unit,
+          transformation:component.series.transformation})) settings.push([field,component.id,value]);
+      });
+      return [
+        {name:'Chart data',rows:[headers,...rows]},
+        {name:'Raw data',rows:rawRows},
+        {name:'Statistics',rows:[['statistic','value'],...statistics]},
+        {name:'Inputs',rows:[['series_id',...compositePayload.columns],...inputRows]},
+        {name:'Settings',rows:settings}
+      ];
+    }
+    function downloadComposite(name, result, stats, recipe) {
+      saveExcel(name, compositeExportSheets(name,result,stats,recipe));
+    }
+
+    // Portable collection contains recipes only. Values always come from this HTML.
+    function validateMonitorCollection(value) {
+      if (!value || value.version !== 2 || !Array.isArray(value.monitors)) throw new Error('Expected a saved monitors file (version 2).');
+      const seen = new Set();
+      return value.monitors.map(monitor => {
+        if (!monitor || typeof monitor.id !== 'string' || !monitor.id || seen.has(monitor.id)) throw new Error('Monitor IDs must be unique.');
+        if (typeof monitor.name !== 'string' || !monitor.name.trim() || monitor.name.length > 100) throw new Error('Each monitor needs a name of 1–100 characters.');
+        if (monitor.recipe?.version !== 1) throw new Error('Unsupported monitor recipe.');
+        if (!Array.isArray(monitor.recipe.components) || monitor.recipe.components.some(component => !component || !isNumber(component.weight) || component.weight < 0)) throw new Error('Saved weights must be finite nonnegative numbers.');
+        resolveCompositeWeights(monitor.recipe, knownSeries); // validate identities, numeric weights, direction and modes
+        seen.add(monitor.id);
+        return {id:monitor.id,name:monitor.name.trim(),recipe:clone(monitor.recipe)};
+      });
+    }
+    function persistMonitors(message) {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({version:2,monitors:savedMonitors}));
+        element('monitors-status').textContent = message + ' · saved in this browser. Save monitors for next week.';
+      } catch (error) { element('monitors-status').textContent = message + ' · use Save monitors to keep this collection.'; }
+    }
+    function renderMonitors() {
+      monitorResults.clear();
+      element('monitor-count').textContent = '(' + savedMonitors.length + ')';
+      element('monitor-cards').innerHTML = savedMonitors.map(monitor => {
+        let body, enabled = false;
+        try {
+          const missing = monitor.recipe.components.filter(component => !hasOwn(compositeSeries, component.id)
+            && (monitor.recipe.weightMode === 'equal' || component.weight > 0)).map(component => knownSeries[component.id]?.name || component.id);
+          if (missing.length) throw new Error('Data not loaded: ' + missing.join(', '));
+          const result = calculateComposite(monitor.recipe), stats = compositeStatistics(result);
+          if (!stats) throw new Error('No complete common observations.');
+          monitorResults.set(monitor.id,{result,stats}); enabled = true;
+          body = `<p class="formula">${safeText(compositeFormula(result.components,monitor.recipe))}</p>${drawComposite(result,stats)}<div class="readings">${readingsHtml(stats)}</div><p class="method">${safeText(result.unit)} · ${stats.date} · ${safeText(compactBand(stats))}</p>`;
+        } catch (error) { body = `<p class="missing">${safeText(error.message)}</p>`; }
+        return `<article class="chart-panel monitor-card" data-monitor-id="${safeText(monitor.id)}"><div class="chart-heading"><h3>${safeText(monitor.name)}</h3><div class="downloads"><button data-monitor-download="${safeText(monitor.id)}" ${enabled ? '' : 'disabled'}>Download data</button><button data-monitor-edit="${safeText(monitor.id)}">Edit</button><button data-monitor-copy="${safeText(monitor.id)}">Duplicate</button><button data-monitor-remove="${safeText(monitor.id)}">Remove</button></div></div>${body}</article>`;
+      }).join('') || '<p class="context">Create a chart above and add it here.</p>';
+    }
+    function addMonitor() {
+      if (!currentCompositeStats) return;
+      const name = element('monitor-name').value.trim();
+      if (!name || name.length > 100) { element('composite-message').textContent = 'Give this monitor a name of 1–100 characters.'; element('monitor-name').focus(); return; }
+      const monitor = {id:editingMonitorId || 'monitor_' + Date.now().toString(36) + '_' + monitorSequence++, name, recipe:clone(currentCompositeRecipe)};
+      rememberCollection();
+      if (editingMonitorId) savedMonitors = savedMonitors.map(item => item.id === editingMonitorId ? monitor : item);
+      else savedMonitors.push(monitor);
+      editingMonitorId = monitor.id; element('monitor-add').textContent = 'Update monitor'; element('monitor-cancel').hidden = false;
+      renderMonitors(); persistMonitors('Monitor saved');
+      element('composite-message').textContent = '';
+      element('builder-status').textContent = 'Saved below. Update this monitor, or choose New monitor.';
+    }
+
+    function rememberCollection() {
+      collectionUndo = clone(savedMonitors);
+      element('monitors-undo').hidden = false;
+    }
+    function startNewMonitor() {
+      setBuilder({version:1,weightMode:'equal',scale:'standardized',alignment:'exact',components:[]});
+      alignmentManuallyChosen = false;
+      element('indicator-search').focus();
+    }
+    function suggestAlignment() {
+      if (alignmentManuallyChosen) return;
+      const frequencies = new Set(selectedComponents.filter(component => component.weight > 0).map(component => compositeSeries[component.id]?.frequency));
+      element('alignment-mode').value = frequencies.size > 1 ? 'monthly' : 'exact';
+    }
+    element('indicator-group').replaceChildren(new Option('All topics',''), ...[...new Set(Object.values(compositeSeries).map(series => series.group))].sort().map(group => new Option(group,group)));
+    element('indicator-group').addEventListener('change',renderIndicatorLibrary);
+    element('indicator-search').addEventListener('input',renderIndicatorLibrary);
+    element('indicator-library').addEventListener('change', event => {
+      const id = event.target.dataset.selectIndicator;
+      if (!id) return;
+      if (event.target.checked && !selectedComponents.some(component => component.id === id)) selectedComponents.push({id,weight:1,direction:1});
+      else if (!event.target.checked) selectedComponents = selectedComponents.filter(component => component.id !== id);
+      suggestAlignment(); renderIndicatorLibrary(); renderComponentRows(); markCompositePending();
+    });
+    element('component-clear').addEventListener('click', () => { selectedComponents = []; renderIndicatorLibrary(); renderComponentRows(); markCompositePending(); });
+    element('component-rows').addEventListener('input', event => {
+      const id = event.target.dataset.weight || event.target.dataset.direction;
+      const component = selectedComponents.find(component => component.id === id);
+      if (!component) return;
+      if (event.target.dataset.weight) component.weight = event.target.value.trim() === '' ? null : Number(event.target.value);
+      else component.direction = Number(event.target.value);
+      markCompositePending();
+    });
+    element('component-rows').addEventListener('click', event => {
+      const id = event.target.dataset.remove;
+      if (!id) return;
+      selectedComponents = selectedComponents.filter(component => component.id !== id);
+      suggestAlignment(); renderIndicatorLibrary(); renderComponentRows(); markCompositePending();
+    });
+    ['weight-mode','scale-mode','alignment-mode'].forEach(id => element(id).addEventListener('change', () => {
+      if (id === 'alignment-mode') alignmentManuallyChosen = true;
+      // Each component retains its custom weight while Average is displayed.
+      renderComponentRows(); markCompositePending();
+    }));
+    element('composite-generate').addEventListener('click',updateComposite);
+    element('monitor-add').addEventListener('click',addMonitor);
+    element('monitor-new').addEventListener('click',startNewMonitor);
+    element('monitor-cancel').addEventListener('click', () => {
+      const monitor = savedMonitors.find(item => item.id === editingMonitorId);
+      if (monitor) { setBuilder(monitor.recipe,monitor.name,monitor.id); updateComposite(); }
+      else startNewMonitor();
+    });
+    element('preview-download').addEventListener('click', () => {
+      if (currentCompositeStats) downloadComposite(element('monitor-name').value.trim() || 'Preview',currentComposite,currentCompositeStats,currentCompositeRecipe);
+    });
+    element('monitor-cards').addEventListener('click', event => {
+      const id = event.target.dataset.monitorDownload || event.target.dataset.monitorEdit || event.target.dataset.monitorCopy || event.target.dataset.monitorRemove;
+      const monitor = savedMonitors.find(item => item.id === id);
+      if (!monitor) return;
+      if (event.target.dataset.monitorDownload) {
+        const calculation = monitorResults.get(id);
+        if (calculation) downloadComposite(monitor.name,calculation.result,calculation.stats,monitor.recipe);
+      } else if (event.target.dataset.monitorCopy) {
+        setBuilder(monitor.recipe,monitor.name.slice(0, 93) + ' (copy)'); updateComposite();
+        element('custom-composite').scrollIntoView({block:'start'});
+      } else if (event.target.dataset.monitorEdit) {
+        setBuilder(monitor.recipe,monitor.name,monitor.id); updateComposite();
+        element('custom-composite').scrollIntoView({block:'start'});
+      } else {
+        rememberCollection();
+        savedMonitors = savedMonitors.filter(item => item.id !== id);
+        if (editingMonitorId === id) startNewMonitor();
+        renderMonitors(); persistMonitors('Monitor removed');
+      }
+    });
+    element('monitors-undo').addEventListener('click', () => {
+      if (collectionUndo === null) return;
+      savedMonitors = collectionUndo; collectionUndo = null; element('monitors-undo').hidden = true;
+      startNewMonitor(); renderMonitors(); persistMonitors('Previous collection restored');
+    });
+    element('monitors-save').addEventListener('click', () => {
+      saveFile('us_macro_monitors.json',JSON.stringify({version:2,monitors:savedMonitors},null,2),'application/json');
+    });
+    element('monitors-file').addEventListener('change', async event => {
+      const file = event.target.files[0]; if (!file) return;
+      try {
+        const validated = validateMonitorCollection(JSON.parse(await file.text()));
+        rememberCollection(); savedMonitors = validated; startNewMonitor();
+        renderMonitors(); persistMonitors('Collection loaded with current report data');
+      } catch (error) { element('monitors-status').textContent = 'Not loaded: ' + error.message; }
+      event.target.value = '';
+    });
+    savedMonitors = [{id:'default_average',name:'Labor + inflation Average',recipe:clone(defaultRecipe)}];
+    try {
+      const cached = localStorage.getItem(storageKey);
+      if (cached) savedMonitors = validateMonitorCollection(JSON.parse(cached));
+      element('monitors-status').textContent = 'Save monitors to reuse this collection in next week’s report.';
+    } catch (error) { element('monitors-status').textContent = 'Browser settings unavailable: ' + error.message + '. Use Save / Load monitors.'; }
+    renderMonitors();
+    if (defaultRecipe.components.every(component => compositeSeries[component.id])) {
+      setBuilder(defaultRecipe,'Labor + inflation Average'); updateComposite();
+    } else {
+      // No substitute surprise data. Existing real US inputs are available to explore.
+      const initial = ['PCEC96','DSPIC96'].filter(id => compositeSeries[id]);
+      setBuilder({version:1,weightMode:'equal',scale:'standardized',alignment:'monthly',components:initial.map(id => ({id,weight:1,direction:1}))},'');
+      if (initial.length) updateComposite();
+    }
+  </script>
+</body>
+</html>
