@@ -11,6 +11,8 @@ Combined command: python treasury_regime_study.py run
 Calculation check: python treasury_regime_study.py check
 Historical cutoff: python treasury_regime_study.py run --asof 2026-09-14
 Optional images: python treasury_regime_study.py analyze --images
+Includes the article's published bucket table as an explicitly labeled reference,
+calculated-minus-published comparisons, and volatility/correlation tests by era.
 
 FLOW: Bloomberg -> raw/<timestamp>/observations.csv + manifest.json
       -> read from disk -> calculate -> output/<timestamp>/research.xlsx
@@ -44,7 +46,7 @@ import pandas as pd
 # LF98OAS is quoted in percentage points: 4.34 = 434 bp, NOT 4.34 bp.
 # ============================================================================
 ROOT = Path(__file__).resolve().parent
-VERSION = "1.0"
+VERSION = "1.1"
 HOST, PORT, TIMEOUT = "localhost", 8194, 120
 START = "1973-01-01"
 THRESHOLD = 5.25
@@ -54,6 +56,9 @@ CORRELATION_COLUMN = f"corr_{CORRELATION_WEEKS}w"
 TOTAL_RETURN_COLUMN = f"corr_total_return_{CORRELATION_WEEKS}w"
 MIN_TREND_MONTHS = 120
 BOOTSTRAPS = 500
+# Transcribed reference observations, NEVER used to calculate market results.
+# Screenshot dated 2026-09-15; original sample and observation frequency unknown.
+ARTICLE_POSITIVE_PCT = (29, 32, 42, 49, 41, 36, 34, 64, 87, 70, 72, 74, 86, 99, 100, 100)
 
 # key: (security, field, request frequency, raw unit, required)
 SERIES = {
@@ -75,6 +80,7 @@ SOURCES = {
     "Bloomberg API": "https://bloomberg.github.io/blpapi-docs/python/3.26.9/_autosummary/blpapi.Session.html",
     "HY OAS quote units (4.34 percent)": "https://doubleline.com/wp-content/uploads/12-6-2022-TR-Webcast-FINAL.pdf",
     "Liquidity index mapping (research paper)": "https://www.sciencedirect.com/science/article/abs/pii/S1572308924001542",
+    "Liquidity and MOVE definitions (BIS)": "https://www.bis.org/publ/qtrpdf/r_qt2209c_annex.pdf",
 }
 
 
@@ -439,6 +445,64 @@ def bucket_table(frame, corr=CORRELATION_COLUMN):
     return pd.DataFrame(rows)
 
 
+def article_comparison(weekly):
+    """Published percentages are comparison targets, not fitted observations."""
+    table = bucket_table(weekly).iloc[1:-1].copy().reset_index(drop=True)
+    table = table.rename(columns={"positive_pct": "calculated_positive_pct",
+                                  "negative_pct": "calculated_negative_pct"})
+    table["article_positive_pct"] = ARTICLE_POSITIVE_PCT
+    table["article_negative_pct"] = 100 - table["article_positive_pct"]
+    table["positive_gap_pp"] = table["calculated_positive_pct"] - table["article_positive_pct"]
+    return table[["bucket", "n", "article_positive_pct", "calculated_positive_pct",
+                  "positive_gap_pp", "article_negative_pct", "calculated_negative_pct",
+                  "zero_pct", "first", "last", "calendar_years", "contiguous_runs", "pre2000_pct"]]
+
+
+def volatility_regimes(weekly):
+    """Test the article's sign/era claim using matched weekly observations.
+
+    Realized yield volatility is NOT MOVE implied volatility. Differences are
+    taken on the full calendar before splitting periods/signs, never across
+    disconnected selected dates. These are descriptive associations only.
+    """
+    rows = []
+    year = weekly.index.year
+    eras = (("All", year > 0), ("1990s", (year >= 1990) & (year < 2000)),
+            ("2000-2019", (year >= 2000) & (year < 2020)), ("2020 onward", year >= 2020))
+    metrics = [("Realized yield volatility", "yield_vol_26w_bp")]
+    if "move_at_core_close" in weekly:
+        metrics.append(("MOVE implied volatility", "move_at_core_close"))
+    for metric, column in metrics:
+        pair = weekly[[CORRELATION_COLUMN, column]]
+        for period, era in eras:
+            for sign, selection in (("All", pd.Series(True, index=weekly.index)),
+                                    ("Positive", weekly[CORRELATION_COLUMN].gt(0)),
+                                    ("Negative", weekly[CORRELATION_COLUMN].lt(0))):
+                for measure, values in (("Levels", pair), ("1W changes", pair.diff())):
+                    sample = values.loc[era & selection].dropna()
+                    sufficient = len(sample) >= 20 and sample.std().gt(1e-12).all()
+                    correlation = sample.iloc[:, 0].corr(sample.iloc[:, 1]) if sufficient else np.nan
+                    rows.append(dict(metric=metric, period=period, correlation_sign=sign,
+                                     measure=measure, n=len(sample), correlation=correlation,
+                                     first=str(sample.index.min().date()) if len(sample) else "",
+                                     last=str(sample.index.max().date()) if len(sample) else ""))
+    return pd.DataFrame(rows)
+
+
+def data_availability(raw, end):
+    """Make optional omissions and stale source observations visible in Excel."""
+    rows = []
+    for key, (security, field, frequency, unit, required) in SERIES.items():
+        observations = raw.loc[raw["series"].eq(key) & raw["date"].le(pd.Timestamp(end))].dropna(subset=["value"])
+        first, last = observations["date"].min(), observations["date"].max()
+        rows.append(dict(series=key, security=security, field=field, frequency=frequency,
+                         unit=unit, required=required, n=len(observations),
+                         first=first, last=last,
+                         days_before_cutoff=(pd.Timestamp(end) - last).days if len(observations) else np.nan,
+                         status="Available" if len(observations) else "Unavailable at cutoff"))
+    return pd.DataFrame(rows)
+
+
 def conditional_summary(frame, threshold=THRESHOLD, corr=CORRELATION_COLUMN):
     rows = []
     for period, eligible in (("All", np.ones(len(frame), dtype=bool)),
@@ -632,7 +696,8 @@ def forward_channels(weekly):
 # ============================================================================
 def methodology(end, manifest):
     return pd.DataFrame([
-        ("Scope", "Transparent reconstruction of user-provided Bloomberg screenshots. Exact original tickers, date range, smoothing and trend estimator are not fully disclosed. Published table numbers are not hardcoded."),
+        ("Scope", "Transparent reconstruction of user-provided Bloomberg screenshots dated 2026-09-15. Exact original tickers, date range, smoothing and trend estimator are not fully disclosed. Calculated results are independent of the transcribed reference table."),
+        ("Article comparison", "article_comparison contains the 16 published yield buckets, calculated shares, counts and calculated-minus-published gaps in percentage points. Published percentages are rounded; original counts are unavailable. Different cutoffs, sampling and coverage prevent claiming exact replication. The published 5.25-5.50% bucket itself has 36% negative observations; 5.25% is not a deterministic boundary."),
         ("Cutoff", f"Data <= {end}. Incomplete final weeks/months excluded. Daily close data cannot recreate the article's intraday snapshot. Historical data are today's downloaded vintage, not archived point-in-time vintages."),
         ("Core instruments", "USGG10YR yield in percent; LUATTRUU Treasury total-return index; SPX price index. SPTR total-return sensitivity is separate. Do not substitute LBUSTRUU (Aggregate) for Treasuries."),
         ("Data flow", "Bloomberg HistoricalDataRequest -> immutable CSV + manifest + API messages -> hash-checked disk read -> derived tables -> charts. Required failures stop; optional failures remain visible."),
@@ -650,6 +715,7 @@ def methodology(end, manifest):
         ("Bootstrap", "Circular paired moving blocks of 26/52/104 calendar weeks; missing rows stay on the grid. Outcome difference = high-yield mean minus lower-yield mean. Each regime needs >=20 observations. CI withheld if fewer than 80% (and 100) valid replications. Exploratory, no multiple-testing correction, not proof of causality/stationarity."),
         ("Non-overlap check", f"Evaluate every one of the {FORWARD_WEEKS} possible fixed-phase grids of {FORWARD_WEEKS}-week outcomes; report all phases. Non-overlapping return windows can still be serially dependent."),
         ("Volatility / liquidity", "Plot raw weekly matched-date values and explicit 13-week averages separately. Original screenshot smoother unknown. Higher GVLQUSD means poorer liquidity; MOVE and VIX are different implied-volatility measures. Correlation of changes is separate from level correlation."),
+        ("Volatility regime test", "Pearson association of stock-bond correlation with 26-week sample SD of weekly 10Y yield changes in bp, annualized by sqrt(52), and separately with MOVE on core source dates. Report levels and 1W changes by 1990s/2000-2019/2020+ and correlation sign at t. Changes are computed before filtering; >=20 pairs and nonconstant series required. Overlap and sign conditioning preclude treating these as independent causal tests."),
         ("Forward transmission test", f"For MOVE, VIX, HY OAS and liquidity, compare the next {FORWARD_WEEKS}-week change across yield regimes and eras. Each outcome uses its own valid endpoint pairs; sample counts differ. P10/P90 are outcome dispersion, not confidence intervals. No causal chain is assumed."),
         ("Credit units", "LF98OAS PX_LAST raw is in percent; derived hy_oas is multiplied by 100 for bp. Raw CSV/Excel retain the unscaled API values. Check DES/FLDS and entitlements when changing ticker or field."),
         ("Commodity scope", "BCOM is a global commodity benchmark used as a US inflation context variable. Its rising level does not establish commodity breadth; no non-US macro releases are included."),
@@ -709,6 +775,8 @@ def create_charts(weekly, trend, tables, pairs):
     x = np.arange(len(bucket))
     ax.bar(x, bucket["positive_pct"], color=navy, label="Positive correlation")
     ax.bar(x, bucket["negative_pct"], bottom=bucket["positive_pct"], color="#dfe5eb", label="Negative correlation")
+    ax.bar(x, bucket["zero_pct"], bottom=bucket["positive_pct"] + bucket["negative_pct"],
+           color=teal, label="Zero correlation")
     for i, (_, row) in enumerate(bucket.iterrows()):
         label = f"{row['positive_pct']:.0f}%\nn={int(row['n'])}" if row["n"] else "n=0"
         ax.text(i, 103, label, ha="center", va="bottom", fontsize=7)
@@ -718,6 +786,35 @@ def create_charts(weekly, trend, tables, pairs):
     ax.legend(loc="upper left", fontsize=8, frameon=False)
     add("02_yield_buckets", title, fig, ax, bucket, ["positive_pct", "negative_pct", "zero_pct"], "%",
         "Buckets include lower bound. Overlapping correlations are not independent observations.", "bar")
+
+    comparison = article_comparison(weekly).set_index("bucket")
+    title = "Published yield buckets versus this reconstruction"
+    fig, ax = new(title, "Article: 15 September 2026 · percentages rounded for display · gaps in percentage points", "", (11.5, 8.0))
+    ax.set_axis_off()
+    cells = []
+    for bucket_name, row in comparison.iterrows():
+        cells.append([bucket_name, str(int(row["n"])), f"{row['article_positive_pct']:.0f}",
+                      f"{row['calculated_positive_pct']:.1f}" if row["n"] else "unavailable",
+                      f"{row['positive_gap_pp']:+.1f}" if row["n"] else "unavailable",
+                      f"{row['article_negative_pct']:.0f}",
+                      f"{row['calculated_negative_pct']:.1f}" if row["n"] else "unavailable"])
+    rendered = ax.table(cellText=cells,
+                        colLabels=["10Y bucket", "n", "Article + %", "Study + %", "Gap (pp)", "Article - %", "Study - %"],
+                        cellLoc="center", bbox=[0, -.15, 1, 1.22])
+    rendered.auto_set_font_size(False)
+    rendered.set_fontsize(9)
+    for (r, c), cell in rendered.get_celld().items():
+        cell.set_edgecolor("white")
+        if r == 0:
+            cell.set_facecolor(navy)
+            cell.get_text().set_color("white")
+            cell.get_text().set_weight("bold")
+        else:
+            cell.set_facecolor("#eef3f7" if r % 2 else "#ffffff")
+    add("02b_article_comparison", title, fig, ax, comparison,
+        ["n", "article_positive_pct", "calculated_positive_pct", "positive_gap_pp",
+         "article_negative_pct", "calculated_negative_pct"], "%",
+        "Published reference transcribed from supplied screenshot; original sample and exact method unknown.", "table")
 
     title = "Yield level and the stock-bond regime"
     fig, ax = new(title, f"Same-date weekly observations · 52-, {CORRELATION_WEEKS}- and 156-week sensitivity", "Return correlation")
@@ -752,10 +849,31 @@ def create_charts(weekly, trend, tables, pairs):
     if "bcom" in weekly:
         title = "Commodity prices as inflation context"
         frame = weekly.loc[weekly.index.year >= 2012]
-        fig, ax = new(title, "Bloomberg Commodity Index · weekly level", "BCOM index")
-        ax.plot(frame.index, frame["bcom"], color=orange, lw=1.8)
-        add("05_commodities", title, fig, ax, frame, ["bcom"], "Index",
-            "A higher aggregate index does not by itself establish sector breadth.")
+        if frame["bcom"].notna().any():
+            fig, ax = new(title, "Bloomberg Commodity Index · weekly level", "BCOM index")
+            ax.plot(frame.index, frame["bcom"], color=orange, lw=1.8)
+            add("05_commodities", title, fig, ax, frame, ["bcom"], "Index",
+                "A higher aggregate index does not by itself establish sector breadth.")
+
+    title = "Yield volatility and stock-bond correlation across eras"
+    vol = volatility_regimes(weekly)
+    vol = vol.loc[vol["correlation_sign"].eq("All") & vol["measure"].eq("Levels") & vol["period"].ne("All")]
+    frame = vol.pivot(index="period", columns="metric", values="correlation").reindex(["1990s", "2000-2019", "2020 onward"])
+    fig, ax = new(title, "Association with correlation levels · realized volatility and MOVE measured separately", "Pearson correlation")
+    for i, column in enumerate(frame):
+        positions = np.arange(len(frame)) + (i - (len(frame.columns) - 1) / 2) * .36
+        ax.bar(positions, frame[column], width=.34, label=column, color=navy if i == 0 else orange)
+        counts = vol.loc[vol["metric"].eq(column)].set_index("period")["n"]
+        for position, period in zip(positions, frame.index):
+            value = frame.loc[period, column]
+            ax.text(position, 0 if pd.isna(value) else value + (.04 if value >= 0 else -.08),
+                    f"n={counts[period]}", ha="center", fontsize=8)
+    ax.axhline(0, color=gray, lw=.7)
+    ax.set_xticks(np.arange(len(frame)), frame.index)
+    ax.set_xlim(-.6, len(frame) - .4)
+    ax.set_ylim(-1.15, 1.15)
+    add("10_volatility_regimes", title, fig, ax, frame, list(frame.columns), "Correlation",
+        "Realized: 26-week SD of yield changes, annualized. Missing estimates remain blank; no causal inference.", "bar")
 
     title = f"Does the {THRESHOLD:g}% result survive different periods?"
     stats = tables["period_regimes"]
@@ -882,13 +1000,14 @@ def excel_export(path, raw, tables, charts):
     for name, frame in tables.items():
         if name not in ("Findings", "methods"):
             sheet(name[:31], frame, isinstance(frame.index, pd.DatetimeIndex))
+    displayed_charts = 0
     for number, spec in enumerate(charts, 1):
         chart_data = spec["data"].copy()
         is_date = isinstance(chart_data.index, pd.DatetimeIndex)
         if spec["kind"] == "bar" and is_date:
             chart_data.index = chart_data.index.strftime("%Y-%m-%d")
         source = sheet(f"C{number:02d}_{spec['key'][:22]}", chart_data, True)
-        if not len(spec["data"]):
+        if not len(spec["data"]) or spec["kind"] == "table":
             continue
         chart = BarChart() if spec["kind"] == "bar" else LineChart()
         chart.title, chart.y_axis.title = spec["title"], spec["ylabel"]
@@ -899,6 +1018,8 @@ def excel_export(path, raw, tables, charts):
         if spec["key"] == "02_yield_buckets":
             chart.grouping, chart.overlap = "stacked", 100
             chart.y_axis.scaling.min, chart.y_axis.scaling.max = 0, 100
+        if spec["key"] == "10_volatility_regimes":
+            chart.y_axis.scaling.min, chart.y_axis.scaling.max = -1, 1
         if spec["kind"] == "line" and is_date:
             chart.x_axis = DateAxis(axId=10, crossAx=100, numFmt="yyyy", majorTimeUnit="years")
             chart.y_axis.crossAx = 10
@@ -917,7 +1038,8 @@ def excel_export(path, raw, tables, charts):
         else:
             chart.add_data(Reference(source, min_col=2, max_col=len(spec["data"].columns)+1, min_row=1, max_row=n), titles_from_data=True)
         chart.set_categories(Reference(source, min_col=1, min_row=2, max_row=n))
-        display.add_chart(chart, f"A{3 + (number-1)*25}")
+        display.add_chart(chart, f"A{3 + displayed_charts*25}")
+        displayed_charts += 1
     sheet("Raw_data", raw)
     workbook.save(path)
 
@@ -937,6 +1059,18 @@ def dynamic_findings(weekly, trend, tables):
         findings.append(f"Treasury 12M return versus its prior-only trend: {latest_z.iloc[-1]:+.2f} residual SD on {latest_z.index[-1].date()}.")
     if hi["forward_n"] and lo["forward_n"]:
         findings.append(f"Next-{FORWARD_WEEKS}W joint loss frequency: {hi['joint_loss_pct']:.0f}% in the high-yield regime vs {lo['joint_loss_pct']:.0f}% below. These are separate from correlation-sign shares.")
+    comparison = tables.get("article_comparison")
+    if comparison is not None:
+        gaps = comparison["positive_gap_pp"].dropna()
+        if len(gaps):
+            findings.append(f"Across {len(gaps)} populated article buckets, mean absolute positive-share gap is {gaps.abs().mean():.1f} percentage points (unweighted). Original sample and exact methodology are unknown; this is not an exact-replication claim.")
+    vol = tables.get("volatility_regimes")
+    if vol is not None:
+        selected = vol.loc[vol["metric"].eq("Realized yield volatility") & vol["measure"].eq("Levels") &
+                           vol["correlation_sign"].eq("All") & vol["period"].ne("All")]
+        for row in selected.itertuples(index=False):
+            if pd.notna(row.correlation):
+                findings.append(f"{row.period}: association of realized yield volatility with stock-bond correlation = {row.correlation:+.2f}, based on {row.n} overlapping weekly pairs; descriptive, not causal.")
     return findings
 
 
@@ -949,11 +1083,17 @@ def export(raw, manifest, end, weekly, trend, coverage, daily_sensitivity,
                   daily_sensitivity=daily_sensitivity, yield_buckets=bucket_table(weekly),
                   period_regimes=conditional_summary(weekly), **deeper_research(weekly, daily_sensitivity, repetitions))
     tables["transmission"], pairs = transmission_tables(raw, end)
+    tables["article_comparison"] = article_comparison(weekly)
+    tables["volatility_regimes"] = volatility_regimes(weekly)
+    tables["data_availability"] = data_availability(raw, end)
     tables["forward_channels"] = forward_channels(weekly)
     tables["methods"] = methodology(end, manifest)
     findings = dynamic_findings(weekly, trend, tables)
     for key, error in manifest.get("errors", {}).items():
         findings.append(f"Unavailable optional history: {key}. {error}")
+    for row in tables["data_availability"].itertuples(index=False):
+        if not row.required and row.n == 0 and row.series not in manifest.get("errors", {}):
+            findings.append(f"Unavailable optional history at analysis cutoff: {row.series} ({row.security}).")
     last_close = weekly.dropna(subset=CORE)["source_date"].iloc[-1]
     last_correlation = weekly.dropna(subset=[CORRELATION_COLUMN])["source_date"].iloc[-1]
     if (pd.Timestamp(end) - last_close).days > 10:
@@ -976,7 +1116,8 @@ def export(raw, manifest, end, weekly, trend, coverage, daily_sensitivity,
                   libraries=dict(pandas=pd.__version__, numpy=np.__version__),
                   parameters=dict(threshold=THRESHOLD, correlation_weeks=CORRELATION_WEEKS,
                                   forward_weeks=FORWARD_WEEKS, prior_trend_min_months=MIN_TREND_MONTHS,
-                                  bootstrap_repetitions=repetitions),
+                                  bootstrap_repetitions=repetitions, realized_volatility_weeks=26,
+                                  article_reference_date="2026-09-15"),
                   artifacts={str(p.relative_to(folder)): hashlib.sha256(p.read_bytes()).hexdigest()
                              for p in folder.rglob("*") if p.is_file()}))
         # Publish only after every artifact has been written successfully.
