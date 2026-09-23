@@ -170,7 +170,8 @@
         <div class="builder-heading"><h3><span class="step-number">3</span>Preview and add</h3></div>
         <div class="composite-controls">
           <label>How to compare the inputs<select id="scale-mode"><option value="standardized">Standardize · compare different units</option><option value="raw">Keep original chart values</option></select></label>
-          <label>How to match dates<select id="alignment-mode"><option value="monthly">Monthly · last value in each complete month</option><option value="exact">Same date · identical observation dates</option></select></label>
+          <label>Date alignment<select id="alignment-mode"><option value="auto">Automatic</option><option value="monthly">Completed months</option></select></label>
+          <label id="carry-control" hidden>Maximum age · calendar days<input id="carry-days" type="number" min="0" max="31" step="1" value="7"></label>
           <button id="composite-generate" class="primary">Preview chart</button>
         </div>
         <p id="builder-status" role="status" aria-live="polite"></p>
@@ -426,10 +427,11 @@
       return ordered[lower] + (position - lower) * (ordered[upper] - ordered[lower]);
     }
     function resolveCompositeWeights(recipe, inputs = compositeSeries) {
-      if (!recipe || !['equal', 'custom'].includes(recipe.weightMode) || !['raw', 'standardized'].includes(recipe.scale) || !['exact', 'monthly'].includes(recipe.alignment)) {
+      if (!recipe || !['equal', 'custom'].includes(recipe.weightMode) || !['raw', 'standardized'].includes(recipe.scale) || !['auto', 'exact', 'daily', 'monthly'].includes(recipe.alignment)) {
         throw new Error('Choose a valid weight, scale and alignment mode.');
       }
       if (!Array.isArray(recipe.components) || !recipe.components.length) throw new Error('Add at least one loaded indicator.');
+      if (recipe.alignment === 'daily' && (!Number.isInteger(recipe.maxCarryDays) || recipe.maxCarryDays < 0 || recipe.maxCarryDays > 31)) throw new Error('Daily alignment needs a maximum age between 0 and 31 calendar days.');
       const seen = new Set();
       const components = recipe.components.map(component => {
         if (!component || typeof component.id !== 'string') throw new Error('Unknown indicator.');
@@ -469,6 +471,14 @@
         throw new Error('Original values have different units or transformations. Choose Standardized values, or select comparable inputs.');
       }
       const frequencies = new Set(active.map(component => component.series.frequency));
+      // Automatic daily matching carries only past observations for a bounded
+      // time. Other native frequencies keep original dates; mixed inputs use months.
+      const effectiveAlignment = recipe.alignment === 'auto'
+        ? frequencies.size === 1 ? frequencies.has('Daily') ? 'daily' : 'exact' : 'monthly'
+        : recipe.alignment;
+      recipe = {...recipe, alignment:effectiveAlignment, maxCarryDays:recipe.maxCarryDays ?? 7};
+      if (effectiveAlignment === 'daily' && (!Number.isInteger(recipe.maxCarryDays) || recipe.maxCarryDays < 0 || recipe.maxCarryDays > 31)) throw new Error('Maximum age must be 0–31 calendar days.');
+      if (recipe.alignment === 'daily' && (frequencies.size !== 1 || !frequencies.has('Daily'))) throw new Error('Daily alignment is only for daily input series. Use Monthly for mixed frequencies.');
       if (recipe.alignment === 'exact' && frequencies.size > 1) {
         throw new Error('Exact dates require the same native frequency. Choose Completed calendar months for mixed-frequency inputs.');
       }
@@ -481,6 +491,7 @@
         const lookup = new Map();
         component.series.rows.forEach(row => {
           if (row.date > cutoff) return;
+          if (recipe.alignment === 'daily' && !isNumber(row.value)) return;
           if (recipe.alignment === 'monthly' && row.date.slice(0, 7) >= cutoff.slice(0, 7)) return;
           const day = recipe.alignment === 'monthly' ? row.date.slice(0, 7) + '-01' : row.date;
           // Choose by date, even if imported/native rows are not already sorted.
@@ -490,12 +501,28 @@
       });
       // Zero-weight selections appear in downloads, but cannot add dates or
       // constrain the complete sample used by positive-weight components.
-      const allDates = [...new Set(mapped.flatMap((lookup, i) => components[i].weight > 0 ? [...lookup.keys()] : []))].sort();
+      let allDates = [...new Set(mapped.flatMap((lookup, i) => components[i].weight > 0 ? [...lookup.keys()] : []))].sort();
+      if (recipe.alignment === 'daily' && allDates.length) {
+        const first = allDates[0], last = allDates[allDates.length - 1];
+        allDates = [];
+        for (let day = new Date(first + 'T00:00:00Z'); day.toISOString().slice(0,10) <= last; day.setUTCDate(day.getUTCDate()+1)) {
+          if (![0,6].includes(day.getUTCDay())) allDates.push(day.toISOString().slice(0,10));
+        }
+      }
+      const ordered = mapped.map(lookup => [...lookup.values()].sort((a,b) => a.date.localeCompare(b.date)));
+      const positions = components.map(() => -1);
       const points = allDates.map(day => {
         const parts = components.map((component, i) => {
-          const row = mapped[i].get(day);
+          let row = mapped[i].get(day);
+          if (recipe.alignment === 'daily') {
+            while (positions[i]+1 < ordered[i].length && ordered[i][positions[i]+1].date <= day) positions[i]++;
+            row = ordered[i][positions[i]];
+            if (row && (Date.parse(day)-Date.parse(row.date))/86400000 > recipe.maxCarryDays) row = undefined;
+          }
           const input = row ? row[recipe.scale === 'raw' ? 'value' : 'z'] : null;
-          return {id:component.id, sourceDate:row?.date ?? null, original:row?.original_value ?? null,
+          return {id:component.id, sourceDate:row?.date ?? null,
+            ageDays:row ? (Date.parse(day)-Date.parse(row.date))/86400000 : null,
+            carried:recipe.alignment === 'daily' && !!row && row.date !== day, original:row?.original_value ?? null,
             raw:row?.value ?? null, input,
             contribution:component.weight === 0 ? 0 : isNumber(input) ? component.weight * component.direction * input : null};
         });
@@ -505,7 +532,8 @@
         return {date:day, value, parts};
       });
       return {points, components, unit:recipe.scale === 'raw' ? active[0].series.unit : 'weighted z-score',
-        frequency:recipe.alignment === 'monthly' ? 'Monthly' : active[0].series.frequency};
+        frequency:recipe.alignment === 'monthly' ? 'Monthly' : active[0].series.frequency,
+        alignment:effectiveAlignment, maxCarryDays:recipe.maxCarryDays};
     }
     function compositeChange(valid, frequency, horizon) {
       const latest = valid[valid.length - 1];
@@ -575,7 +603,10 @@
       }
       let path = '', connected = false, previousDate = null;
       sample.forEach(point => {
-        if (!isNumber(point.value)) { connected = false; previousDate = null; return; }
+        if (!isNumber(point.value)) {
+          if (result.frequency !== 'Daily') { connected = false; previousDate = null; }
+          return;
+        }
         // Leave a visible gap if an entire month/week is missing from all inputs.
         if (previousDate) {
           const gapDays = (Date.parse(point.date) - Date.parse(previousDate)) / 86400000;
@@ -603,14 +634,15 @@
     const monitorResults = new Map();
     const knownSeries = Object.assign(Object.create(null), compositePayload.known_series || compositeSeries);
     const storageKey = 'us-macro-monitors-v2:' + location.pathname;
-    const defaultRecipe = {version:1, weightMode:'equal', scale:'raw', alignment:'exact', components:[
+    const defaultRecipe = {version:1, weightMode:'equal', scale:'raw', alignment:'auto', maxCarryDays:7, components:[
       {id:'SURPRISE_EMPLOYMENT', weight:1, direction:1}, {id:'SURPRISE_INFLATION', weight:1, direction:1}]};
     const clone = value => JSON.parse(JSON.stringify(value));
 
     function readCompositeRecipe() {
       const mode = element('weight-mode').value;
       return {version:1, weightMode:mode, scale:element('scale-mode').value,
-        alignment:element('alignment-mode').value, components:selectedComponents.map(component => ({...component, weight:mode === 'equal' ? 1 : component.weight}))};
+        alignment:element('alignment-mode').value, maxCarryDays:Number(element('carry-days').value),
+        components:selectedComponents.map(component => ({...component, weight:mode === 'equal' ? 1 : component.weight}))};
     }
     function renderIndicatorLibrary() {
       const query = element('indicator-search').value.trim().toLowerCase();
@@ -660,6 +692,14 @@
       return stats.p10 === null ? `${stats.historyCount} prior observations · insufficient history for band`
         : `Prior P10–P90: ${displayNumber(stats.p10)} to ${displayNumber(stats.p90)} · ${stats.historyStart}–${stats.historyEnd} · n=${stats.historyCount}`;
     }
+    function alignmentSummary(result, recipe) {
+      const complete = result.points.filter(point => isNumber(point.value));
+      const omitted = result.points.length - complete.length;
+      const carried = complete.filter(point => point.parts.some((part,i) => part.carried && result.components[i].weight > 0)).length;
+      return result.alignment === 'daily'
+        ? `${complete.length} weekday values · ${carried} use a prior observation · max age ${result.maxCarryDays}d · ${omitted} unavailable`
+        : `${complete.length} common observations · ${omitted} unmatched dates skipped`;
+    }
     function readingsHtml(stats) {
       const middle = stats.changes[1];
       const readings = [['Latest',displayNumber(stats.value)], [middle.label + ' Δ',displayNumber(middle.value)],
@@ -683,14 +723,17 @@
         currentComposite = result; currentCompositeStats = stats; currentCompositeRecipe = clone(recipe);
         element('composite-chart').innerHTML = drawComposite(result, stats);
         element('composite-readings').innerHTML = readingsHtml(stats);
-        element('composite-stat-method').textContent = `${result.unit} · ${stats.date} · ${compactBand(stats)}`;
+        element('composite-stat-method').textContent = `${result.unit} · ${stats.date} · ${alignmentSummary(result,recipe)} · ${compactBand(stats)}`;
         ['preview-download','monitor-add'].forEach(id => element(id).disabled = false);
         element('builder-status').textContent = editingMonitorId ? 'Preview ready · update this monitor.' : 'Preview ready · name and add below.';
       } catch (error) { element('composite-message').textContent = error.message; }
     }
     function setBuilder(recipe, name = '', monitorId = null) {
+      recipe = upgradeAlignment(recipe);
       selectedComponents = clone(recipe.components);
       element('weight-mode').value = recipe.weightMode; element('scale-mode').value = recipe.scale; element('alignment-mode').value = recipe.alignment;
+      element('carry-days').value = recipe.maxCarryDays ?? 7;
+      syncAlignmentControls();
       element('monitor-name').value = name; editingMonitorId = monitorId;
       alignmentManuallyChosen = true;
       element('indicator-search').value = ''; element('indicator-group').value = '';
@@ -700,7 +743,7 @@
     }
     // One workbook for this chart only; calculations stay in section B above.
     function compositeExportSheets(name, result, stats, recipe) {
-      const fields = ['original_value','original_unit','chart_value','chart_unit','input_value','normalized_weight','direction','contribution','source_date','transformation'];
+      const fields = ['original_value','original_unit','chart_value','chart_unit','input_value','normalized_weight','direction','contribution','source_date','transformation','age_days','carried'];
       const headers = ['date','composite','composite_unit','complete','in_chart_window','scale','alignment',
         ...result.components.flatMap(component => fields.map(field => component.id + '__' + field))];
       const rows = result.points.map(point => [point.date,point.value,result.unit,isNumber(point.value),
@@ -708,7 +751,7 @@
         ...point.parts.flatMap((part,i) => {
           const component = result.components[i];
           return [part.original,component.series.original_unit,part.raw,component.series.unit,part.input,
-            component.weight,component.direction,part.contribution,part.sourceDate,component.series.transformation];
+            component.weight,component.direction,part.contribution,part.sourceDate,component.series.transformation,part.ageDays,part.carried];
         })]);
       // Source CSVs retain native dates and standardization warm-up observations.
       const rawIds = [...new Set(result.components.flatMap(component => component.series.raw_ids))].sort();
@@ -725,6 +768,8 @@
       const settings = [['setting','series_id','value'],['name','',name],['report_cutoff','',compositePayload.asof],
         ['weight_mode','',recipe.weightMode === 'equal' ? 'Average' : 'Custom'],['scale','',recipe.scale],
         ['alignment','',recipe.alignment],['formula','',compositeFormula(result.components,recipe)]];
+      settings.push(['effective_alignment','',result.alignment]);
+      settings.push(['max_carry_days','',result.alignment === 'daily' ? result.maxCarryDays : null]);
       result.components.forEach(component => {
         for (const [field,value] of Object.entries({input_name:component.series.name,entered_weight:component.enteredWeight,
           normalized_weight:component.weight,direction:component.direction,unit:component.series.unit,
@@ -751,9 +796,10 @@
         if (typeof monitor.name !== 'string' || !monitor.name.trim() || monitor.name.length > 100) throw new Error('Each monitor needs a name of 1–100 characters.');
         if (monitor.recipe?.version !== 1) throw new Error('Unsupported monitor recipe.');
         if (!Array.isArray(monitor.recipe.components) || monitor.recipe.components.some(component => !component || !isNumber(component.weight) || component.weight < 0)) throw new Error('Saved weights must be finite nonnegative numbers.');
-        resolveCompositeWeights(monitor.recipe, knownSeries); // validate identities, numeric weights, direction and modes
+        const recipe = upgradeAlignment(monitor.recipe);
+        resolveCompositeWeights(recipe, knownSeries); // validate identities, numeric weights, direction and modes
         seen.add(monitor.id);
-        return {id:monitor.id,name:monitor.name.trim(),recipe:clone(monitor.recipe)};
+        return {id:monitor.id,name:monitor.name.trim(),recipe:clone(recipe)};
       });
     }
     function persistMonitors(message) {
@@ -774,7 +820,7 @@
           const result = calculateComposite(monitor.recipe), stats = compositeStatistics(result);
           if (!stats) throw new Error('No complete common observations.');
           monitorResults.set(monitor.id,{result,stats}); enabled = true;
-          body = `<p class="formula">${safeText(compositeFormula(result.components,monitor.recipe))}</p>${drawComposite(result,stats)}<div class="readings">${readingsHtml(stats)}</div><p class="method">${safeText(result.unit)} · ${stats.date} · ${safeText(compactBand(stats))}</p>`;
+          body = `<p class="formula">${safeText(compositeFormula(result.components,monitor.recipe))}</p>${drawComposite(result,stats)}<div class="readings">${readingsHtml(stats)}</div><p class="method">${safeText(result.unit)} · ${stats.date} · ${safeText(alignmentSummary(result,monitor.recipe))} · ${safeText(compactBand(stats))}</p>`;
         } catch (error) { body = `<p class="missing">${safeText(error.message)}</p>`; }
         return `<article class="chart-panel monitor-card" data-monitor-id="${safeText(monitor.id)}"><div class="chart-heading"><h3>${safeText(monitor.name)}</h3><div class="downloads"><button data-monitor-download="${safeText(monitor.id)}" ${enabled ? '' : 'disabled'}>Download data</button><button data-monitor-edit="${safeText(monitor.id)}">Edit</button><button data-monitor-copy="${safeText(monitor.id)}">Duplicate</button><button data-monitor-remove="${safeText(monitor.id)}">Remove</button></div></div>${body}</article>`;
       }).join('') || '<p class="context">Create a chart above and add it here.</p>';
@@ -798,14 +844,23 @@
       element('monitors-undo').hidden = false;
     }
     function startNewMonitor() {
-      setBuilder({version:1,weightMode:'equal',scale:'standardized',alignment:'exact',components:[]});
+      setBuilder({version:1,weightMode:'equal',scale:'standardized',alignment:'auto',maxCarryDays:7,components:[]});
       alignmentManuallyChosen = false;
       element('indicator-search').focus();
     }
     function suggestAlignment() {
-      if (alignmentManuallyChosen) return;
-      const frequencies = new Set(selectedComponents.filter(component => component.weight > 0).map(component => compositeSeries[component.id]?.frequency));
-      element('alignment-mode').value = frequencies.size > 1 ? 'monthly' : 'exact';
+      if (!alignmentManuallyChosen) element('alignment-mode').value = 'auto';
+      syncAlignmentControls();
+    }
+    function syncAlignmentControls() {
+      const average = element('weight-mode').value === 'equal';
+      const frequencies = new Set(selectedComponents.filter(component => average || component.weight > 0).map(component => compositeSeries[component.id]?.frequency));
+      element('carry-control').hidden = element('alignment-mode').value !== 'auto' || frequencies.size !== 1 || !frequencies.has('Daily');
+    }
+    function upgradeAlignment(recipe) {
+      // Reopen older saved monitors with the new automatic matching rule.
+      return {...recipe, alignment:['exact','daily'].includes(recipe.alignment) ? 'auto' : recipe.alignment,
+        maxCarryDays:recipe.maxCarryDays ?? 7};
     }
     element('indicator-group').replaceChildren(new Option('All topics',''), ...[...new Set(Object.values(compositeSeries).map(series => series.group))].sort().map(group => new Option(group,group)));
     element('indicator-group').addEventListener('change',renderIndicatorLibrary);
@@ -817,13 +872,14 @@
       else if (!event.target.checked) selectedComponents = selectedComponents.filter(component => component.id !== id);
       suggestAlignment(); renderIndicatorLibrary(); renderComponentRows(); markCompositePending();
     });
-    element('component-clear').addEventListener('click', () => { selectedComponents = []; renderIndicatorLibrary(); renderComponentRows(); markCompositePending(); });
+    element('component-clear').addEventListener('click', () => { selectedComponents = []; syncAlignmentControls(); renderIndicatorLibrary(); renderComponentRows(); markCompositePending(); });
     element('component-rows').addEventListener('input', event => {
       const id = event.target.dataset.weight || event.target.dataset.direction;
       const component = selectedComponents.find(component => component.id === id);
       if (!component) return;
       if (event.target.dataset.weight) component.weight = event.target.value.trim() === '' ? null : Number(event.target.value);
       else component.direction = Number(event.target.value);
+      syncAlignmentControls();
       markCompositePending();
     });
     element('component-rows').addEventListener('click', event => {
@@ -833,10 +889,12 @@
       suggestAlignment(); renderIndicatorLibrary(); renderComponentRows(); markCompositePending();
     });
     ['weight-mode','scale-mode','alignment-mode'].forEach(id => element(id).addEventListener('change', () => {
+      syncAlignmentControls();
       if (id === 'alignment-mode') alignmentManuallyChosen = true;
       // Each component retains its custom weight while Average is displayed.
       renderComponentRows(); markCompositePending();
     }));
+    element('carry-days').addEventListener('input', markCompositePending);
     element('composite-generate').addEventListener('click',updateComposite);
     element('monitor-add').addEventListener('click',addMonitor);
     element('monitor-new').addEventListener('click',startNewMonitor);

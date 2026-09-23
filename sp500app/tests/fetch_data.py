@@ -260,7 +260,7 @@ def fetch_bloomberg(end_day, start_day):
     csv_path = folder / "observations.csv"
     manifest_path = folder / "manifest.json"
     manifest = dict(status="running", retrieved_at=retrieved.isoformat(), start=str(start_day),
-                    end=str(end_day), series=mappings, errors={})
+                    end=str(end_day), series=mappings, errors={}, request_options={})
     save_json(manifest_path, manifest)
     rows = []
     session = None
@@ -284,8 +284,16 @@ def fetch_bloomberg(end_day, start_day):
                 request.set("startDate", start_day.strftime("%Y%m%d"))
                 request.set("endDate", end_day.strftime("%Y%m%d"))
                 request.set("periodicitySelection", "DAILY")
-                request.set("nonTradingDayFillOption", "ACTIVE_DAYS_ONLY")
+                request.set("periodicityAdjustment", "ACTUAL")
+                # Request the whole weekday calendar for daily indices, retaining
+                # nulls. The analysis can then distinguish dates from values.
+                # Do not ask Bloomberg to fill previous values: that loses the
+                # original source date needed to audit a composite's alignment.
+                calendar_option = "NON_TRADING_WEEKDAYS" if cfg["frequency"] == "Daily" else "ACTIVE_DAYS_ONLY"
+                request.set("nonTradingDayFillOption", calendar_option)
                 request.set("nonTradingDayFillMethod", "NIL_VALUE")
+                manifest["request_options"][key] = dict(periodicitySelection="DAILY", periodicityAdjustment="ACTUAL",
+                    nonTradingDayFillOption=calendar_option, nonTradingDayFillMethod="NIL_VALUE")
                 session.sendRequest(request, correlationId=correlation)
                 sent = True
                 deadline = time.monotonic() + REQUEST_TIMEOUT

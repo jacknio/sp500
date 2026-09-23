@@ -311,12 +311,19 @@ def analyze(rows, asof):
                 or metrics[emp]["frequency"] != metrics[inf]["frequency"]):
             raise ValueError("The default employment/inflation Average requires original levels with matching units and frequency. Use new IDs for alternative definitions.")
         frequency = metrics[emp]["frequency"]
-        e = dict(metrics[emp]["points"])
-        i = dict(metrics[inf]["points"])
-        days = sorted(d for d in e.keys() & i.keys() if e[d] is not None and i[d] is not None)
-        points = [(d, e[d] / 2 + i[d] / 2) for d in days]
+        input_series = {key: dict(unit=metrics[key]["unit"], frequency=frequency,
+                        transformation=metrics[key]["transformation"],
+                        rows=[dict(date=str(d), value=v, original_value=v) for d, v in metrics[key]["points"]])
+                        for key in (emp, inf)}
+        aligned = calculate_composite(dict(weightMode="equal", scale="raw", alignment="auto", maxCarryDays=7,
+                    components=[dict(id=key, weight=1, direction=1) for key in (emp, inf)]), input_series, str(asof))
+        points = [(date.fromisoformat(p["date"]), p["value"]) for p in aligned["points"]]
+        complete = [p for p in aligned["points"] if p["value"] is not None]
+        e = {date.fromisoformat(p["date"]): p["parts"][0]["input"] for p in complete}
+        i = {date.fromisoformat(p["date"]): p["parts"][1]["input"] for p in complete}
+        days = sorted(e)
         cfg = dict(name="Employment + inflation Average", group="US surprises", unit="original index points",
-                   frequency=frequency, transform="level", note="Average = (ECSULBUS + BCMPUSIF) / 2 on common dates. This is your custom calculation; not a published Fed index. Original scales are preserved. Confirm each index's scale, sign and smoothing before interpreting the result.")
+                   frequency=frequency, transform="level", note="Average = (ECSULBUS + BCMPUSIF) / 2. Daily inputs use the latest prior observation, at most 7 calendar days old. Original scales are preserved; this is a custom calculation, not a published Fed index.")
         average = analyze_series("AVERAGE", cfg, points, "Calculated from " + metrics[emp]["source"] + " and " + metrics[inf]["source"])
         if average:
             average["raw_ids"] = [emp, inf]
@@ -393,6 +400,120 @@ def prepare_composite_inputs(metrics, asof, raw_rows=()):
     return dict(asof=str(asof), columns=columns, series=prepared, known_series=known,
                 history_years=HISTORY_YEARS, minimum_observations=MIN_OBSERVATIONS), audit_rows
 
+
+def calculate_composite(recipe, inputs, cutoff):
+    """Python counterpart of the HTML calculator, also used by Excel updates.
+
+    inputs maps an ID to metadata plus rows of dictionaries (date/value/z).
+    Automatic uses bounded daily matching for daily inputs, native dates for
+    one other frequency, or completed months for mixed frequencies.
+    Exact keeps original common dates. Daily uses weekdays and bounded backward
+    matching; monthly selects the last observation in each completed month.
+    Missing positive-weight inputs stay missing. No weights are redistributed.
+    """
+    mode, scale, alignment = (recipe.get(key) for key in ("weightMode", "scale", "alignment"))
+    if mode not in ("equal", "custom") or scale not in ("raw", "standardized") or alignment not in ("auto", "exact", "daily", "monthly"):
+        raise ValueError("Invalid composite weight, scale or alignment mode")
+    carry = recipe.get("maxCarryDays", 7)
+    if alignment == "daily" and (type(carry) is not int or not 0 <= carry <= 31):
+        raise ValueError("Daily maximum age must be 0–31 calendar days")
+    components, seen = [], set()
+    for item in recipe.get("components", []):
+        key = item.get("id")
+        weight = 1 if mode == "equal" else item.get("weight")
+        direction = item.get("direction")
+        if not isinstance(key, str) or key in seen:
+            raise ValueError("Invalid or duplicate composite indicator: " + str(key))
+        if type(weight) not in (int, float) or not math.isfinite(weight) or weight < 0 or type(direction) not in (int, float) or direction not in (1, -1):
+            raise ValueError("Invalid weight/direction: " + key)
+        series = inputs.get(key)
+        if not series and weight == 0 and key in SERIES:
+            series = dict(id=key, name=SERIES[key]["name"], unit="", original_unit="", frequency=None,
+                          transformation="Data not loaded (zero weight)", rows=[], raw_ids=[])
+        if not series:
+            raise ValueError("Data not loaded: " + key)
+        seen.add(key)
+        components.append(dict(id=key, enteredWeight=weight, direction=direction, series=series))
+    total = math.fsum(item["enteredWeight"] for item in components)
+    if not total or not math.isfinite(total):
+        raise ValueError("At least one finite positive weight is required")
+    for item in components:
+        item["weight"] = item["enteredWeight"] / total
+    active = [item for item in components if item["weight"] > 0]
+    frequencies = {item["series"]["frequency"] for item in active}
+    if alignment == "auto":
+        alignment = "daily" if frequencies == {"Daily"} else "exact" if len(frequencies) == 1 else "monthly"
+    if alignment == "daily" and (type(carry) is not int or not 0 <= carry <= 31):
+        raise ValueError("Daily maximum age must be 0–31 calendar days")
+    if alignment == "daily" and frequencies != {"Daily"}:
+        raise ValueError("Daily alignment requires daily input series")
+    if alignment == "exact" and len(frequencies) != 1:
+        raise ValueError("Common dates require the same native frequency")
+    if alignment == "monthly" and "Quarterly" in frequencies:
+        raise ValueError("Quarterly inputs require exact dates")
+    if scale == "raw" and (len({item["series"]["unit"].lower().replace("percent", "%") for item in active}) != 1
+                           or len({item["series"]["transformation"] for item in active}) != 1):
+        raise ValueError("Original inputs need comparable units and transformations; use standardized values")
+    cutoff = str(cutoff)
+    maps, ordered = [], []
+    for item in components:
+        lookup = {}
+        for row in sorted(item["series"]["rows"], key=lambda row: row["date"]):
+            if row["date"] > cutoff or (alignment == "monthly" and row["date"][:7] >= cutoff[:7]):
+                continue
+            if alignment == "daily" and row.get("value") is None:
+                continue
+            key = row["date"][:7] + "-01" if alignment == "monthly" else row["date"]
+            lookup[key] = row
+        maps.append(lookup)
+        ordered.append(sorted(lookup))
+    days = sorted({day for item, lookup in zip(components, maps) if item["weight"] > 0 for day in lookup})
+    if alignment == "daily" and days:
+        first, last = date.fromisoformat(days[0]), date.fromisoformat(days[-1])
+        days = [str(first + timedelta(days=n)) for n in range((last-first).days+1)
+                if (first + timedelta(days=n)).weekday() < 5]
+    points = []
+    for day in days:
+        parts = []
+        for item, lookup, source_dates in zip(components, maps, ordered):
+            row = lookup.get(day)
+            if alignment == "daily":
+                index = bisect.bisect_right(source_dates, day) - 1
+                row = lookup[source_dates[index]] if index >= 0 else None
+                if row and (date.fromisoformat(day)-date.fromisoformat(row["date"])).days > carry:
+                    row = None
+            value = row.get("value" if scale == "raw" else "z") if row else None
+            contribution = 0 if item["weight"] == 0 else None if value is None else item["weight"] * item["direction"] * value
+            parts.append(dict(id=item["id"], sourceDate=row["date"] if row else None,
+                              ageDays=(date.fromisoformat(day)-date.fromisoformat(row["date"])).days if row else None,
+                              carried=bool(alignment == "daily" and row and row["date"] != day),
+                              original=row.get("original_value") if row else None, raw=row.get("value") if row else None,
+                              input=value, contribution=contribution))
+        value = None if any(part["contribution"] is None for part in parts) else math.fsum(part["contribution"] for part in parts)
+        if value is not None and not math.isfinite(value):
+            raise ValueError("Composite calculation overflow")
+        points.append(dict(date=day, value=value, parts=parts))
+    return dict(points=points, components=components, unit=active[0]["series"]["unit"] if scale == "raw" else "weighted z-score",
+                frequency="Monthly" if alignment == "monthly" else active[0]["series"]["frequency"],
+                alignment=alignment, maxCarryDays=carry)
+
+
+def date_coverage(rows, asof):
+    """Calendar diagnostics, not an assertion that holidays are missing data."""
+    output = []
+    for key in sorted({row["series_id"] for row in rows}):
+        own = [row for row in rows if row["series_id"] == key and row["observation_date"] <= str(asof)]
+        valid = sorted(row["observation_date"] for row in own if row["value"] is not None)
+        if not valid:
+            continue
+        first, last = date.fromisoformat(valid[0]), date.fromisoformat(valid[-1])
+        weekdays = {str(first+timedelta(days=n)) for n in range((last-first).days+1) if (first+timedelta(days=n)).weekday()<5}
+        missing = sorted(weekdays-set(valid)) if SERIES[key]["frequency"] == "Daily" else []
+        output.append(dict(series_id=key, frequency=SERIES[key]["frequency"], first_date=valid[0], last_date=valid[-1],
+                           numeric_points=len(valid), null_rows=len(own)-len(valid), missing_weekdays=len(missing),
+                           recent_missing_dates="; ".join(missing[-10:])))
+    return output
+
 # ============================================================================
 # 3. DRAW — static report charts. The interactive builder has its own renderer.
 # ============================================================================
@@ -440,7 +561,10 @@ def line_chart(series, stats, unit, height=285, frequency="Daily"):
             if not start <= day <= end:
                 continue
             if value is None:
-                pen = False
+                # Daily histories may include a null for a non-common holiday.
+                # Join nearby observations without adding an invented value.
+                if frequency != "Daily":
+                    pen = False
                 continue
             gap_limit = {"Daily": 7, "Weekly": 8, "Monthly": 32, "Quarterly": 93}[frequency]
             if last and (day - last[0]).days > gap_limit:
@@ -744,6 +868,8 @@ def build_report(raw_path, asof):
         raise ValueError("Raw CSV changed during this build. Rerun using a stable snapshot; prior outputs were kept.")
     files = {output / "chart_data.csv": analysis_csv, output / "statistics.csv": stats_csv,
              output / "composite_inputs.csv": composite_csv, ROOT / "dashboard.html": template}
+    coverage = date_coverage(rows, asof)
+    files[output / "date_coverage.csv"] = csv_string(["series_id", "frequency", "first_date", "last_date", "numeric_points", "null_rows", "missing_weekdays", "recent_missing_dates"], coverage)
     record = dict(asof=str(asof), raw_path=str(raw_path) if raw_path else None, raw_sha256=raw_hash,
                   generated_at=datetime.now(timezone.utc).isoformat(), chart_count=len(metrics), data_flags=notices,
                   output_sha256={path.relative_to(ROOT).as_posix(): hashlib.sha256(contents.encode("utf-8")).hexdigest()
