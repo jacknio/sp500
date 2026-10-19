@@ -1,0 +1,61 @@
+
+from bertopic import BERTopic
+from umap import UMAP
+from hdbscan import HDBSCAN
+
+# Fake AI earnings call snippets
+snippets = [
+    "AI automation reduced our operating costs by 20%.",
+    "AI helped lower our customer service expenses.",
+    "AI tools significantly reduced labor costs.",
+    "We saved millions through AI cost optimization.",
+
+    "Our new AI products generated strong revenue growth.",
+    "AI software sales increased significantly this quarter.",
+    "Customers are paying more for our AI products.",
+    "Our AI subscription revenue doubled this year.",
+
+    "AI coding assistants improved developer productivity.",
+    "Employees complete tasks faster using AI tools.",
+    "AI increased workforce efficiency across departments.",
+    "Our engineers are more productive with AI.",
+
+    "We are investing heavily in AI data centers.",
+    "AI infrastructure spending increased this quarter.",
+    "We purchased more GPUs to expand AI capacity.",
+    "Capital expenditures for AI servers are rising."
+]
+
+# Configure clustering for a tiny test dataset
+umap_model = UMAP(
+    n_neighbors=3,
+    n_components=2,
+    random_state=42
+)
+
+hdbscan_model = HDBSCAN(
+    min_cluster_size=2,
+    min_samples=1
+)
+
+# Build BERTopic: no predefined labels
+model = BERTopic(
+    embedding_model="all-MiniLM-L6-v2",
+    umap_model=umap_model,
+    hdbscan_model=hdbscan_model,
+    verbose=False
+)
+
+# Discover topics
+topics, _ = model.fit_transform(snippets)
+
+# Output 1: Discovered topics
+print("\n=== DISCOVERED TOPICS ===")
+print(model.get_topic_info()[["Topic", "Count", "Name"]])
+
+# Output 2: Classification for each snippet
+print("\n=== SNIPPET ASSIGNMENTS ===")
+for text, topic in zip(snippets, topics):
+    print(f"Topic {topic}: {text}")
+
+print("\nTEST COMPLETED!")
