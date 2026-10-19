@@ -1,3 +1,4 @@
+python -m pip install bertopic sentence-transformers
 
 from bertopic import BERTopic
 from umap import UMAP
