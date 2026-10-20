@@ -1,33 +1,43 @@
-python -m pip install bertopic sentence-transformers
+
+import os
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 from bertopic import BERTopic
+from sklearn.feature_extraction.text import TfidfVectorizer
 from umap import UMAP
 from hdbscan import HDBSCAN
 
-# Fake AI earnings call snippets
-snippets = [
-    "AI automation reduced our operating costs by 20%.",
-    "AI helped lower our customer service expenses.",
-    "AI tools significantly reduced labor costs.",
-    "We saved millions through AI cost optimization.",
+# 1. Fake earnings call snippets
+docs = [
+    "AI reduced our operating costs.",
+    "AI lowered employee labor costs.",
+    "AI helped cut operating expenses.",
+    "AI automation generated cost savings.",
 
-    "Our new AI products generated strong revenue growth.",
-    "AI software sales increased significantly this quarter.",
-    "Customers are paying more for our AI products.",
-    "Our AI subscription revenue doubled this year.",
+    "AI products increased our revenue.",
+    "AI software sales grew this quarter.",
+    "AI subscriptions generated new revenue.",
+    "AI products boosted customer sales.",
 
-    "AI coding assistants improved developer productivity.",
-    "Employees complete tasks faster using AI tools.",
-    "AI increased workforce efficiency across departments.",
-    "Our engineers are more productive with AI.",
+    "AI improved employee productivity.",
+    "AI coding tools increased developer productivity.",
+    "AI helped employees work faster.",
+    "AI increased workforce efficiency.",
 
-    "We are investing heavily in AI data centers.",
-    "AI infrastructure spending increased this quarter.",
-    "We purchased more GPUs to expand AI capacity.",
-    "Capital expenditures for AI servers are rising."
+    "AI infrastructure spending increased.",
+    "AI data center investments are expanding.",
+    "AI server capital expenditure is rising.",
+    "AI GPU infrastructure requires investment."
 ]
 
-# Configure clustering for a tiny test dataset
+# 2. Convert text into numbers locally
+vectorizer = TfidfVectorizer(
+    stop_words="english",
+    ngram_range=(1, 2)
+)
+embeddings = vectorizer.fit_transform(docs).toarray()
+
+# 3. Configure clustering for a tiny dataset
 umap_model = UMAP(
     n_neighbors=3,
     n_components=2,
@@ -39,24 +49,22 @@ hdbscan_model = HDBSCAN(
     min_samples=1
 )
 
-# Build BERTopic: no predefined labels
+# 4. Run BERTopic without downloading a model
 model = BERTopic(
-    embedding_model="all-MiniLM-L6-v2",
+    embedding_model=None,
     umap_model=umap_model,
     hdbscan_model=hdbscan_model,
     verbose=False
 )
 
-# Discover topics
-topics, _ = model.fit_transform(snippets)
+topics, _ = model.fit_transform(docs, embeddings)
 
-# Output 1: Discovered topics
+# 5. Print results
 print("\n=== DISCOVERED TOPICS ===")
 print(model.get_topic_info()[["Topic", "Count", "Name"]])
 
-# Output 2: Classification for each snippet
-print("\n=== SNIPPET ASSIGNMENTS ===")
-for text, topic in zip(snippets, topics):
-    print(f"Topic {topic}: {text}")
+print("\n=== SENTENCE CLASSIFICATION ===")
+for topic, sentence in zip(topics, docs):
+    print(f"Topic {topic}: {sentence}")
 
-print("\nTEST COMPLETED!")
+print("\nSUCCESS - OFFLINE CLUSTERING COMPLETED")
