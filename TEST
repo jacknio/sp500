@@ -1,0 +1,13 @@
+| FRED ID | What it means | Direct FRED page |
+|---|---|---|
+| `IIAI` | Intermediate inputs **purchased by all industries** | https://fred.stlouisfed.org/series/IIAI |
+| `IISPI` | Intermediate inputs **purchased by private services-producing industries** | https://fred.stlouisfed.org/series/IISPI |
+| `IIGPI` | Intermediate inputs **purchased by private goods-producing industries** | https://fred.stlouisfed.org/series/IIGPI |
+| `GDP` | U.S. nominal GDP | https://fred.stlouisfed.org/series/GDP |
+
+### Optional: only needed if reproducing the original value-added comparisons (2 extra series)
+
+| FRED ID | What it means | Direct FRED page |
+|---|---|---|
+| `VASPI` | Value added by private services-producing industries | https://fred.stlouisfed.org/series/VASPI |
+| `VAGPI` | Value added by private goods-producing industries | https://fred.stlouisfed.org/series/VAGPI |
