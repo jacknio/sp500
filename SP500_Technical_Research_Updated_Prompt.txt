@@ -1,36 +1,21 @@
-def add_holdings_sum(funds, raw_holdings, analysis_date):
-    n = raw_holdings.copy()
+def select_quarter_holdings(raw_holdings, analysis_date):
+    h = raw_holdings.copy()
 
-    n["report_date"] = pd.to_datetime(n["report_date"])
-    n["reported_mv"] = pd.to_numeric(
-        n["reported_mv"], errors="coerce"
-    )
+    h["report_date"] = pd.to_datetime(h["report_date"])
+    analysis_date = pd.Timestamp(analysis_date)
 
-    # Sum all holdings for each fund and report date
-    aum = (
-        n.groupby(
-            ["factset_fund_id", "report_date"],
-            as_index=False
-        )["reported_mv"]
-        .sum(min_count=1)
-        .rename(columns={
-            "reported_mv": "fund_aum_from_holdings"
-        })
-    )
+    # Keep holdings whose report date is in the current calendar quarter
+    h = h.loc[
+        h["report_date"].dt.to_period("Q")
+        == analysis_date.to_period("Q")
+    ].copy()
 
-    # Match each fund to its corresponding report date
-    funds = funds.copy()
-    funds["fund_reference_date"] = pd.to_datetime(
-        funds["fund_reference_date"]
-    )
+    # For each fund, find its latest report date within this quarter
+    latest_date = h.groupby(
+        "factset_fund_id"
+    )["report_date"].transform("max")
 
-    aum = aum.rename(columns={
-        "report_date": "fund_reference_date"
-    })
+    # Keep ALL holdings belonging to that fund's latest report date
+    h = h.loc[h["report_date"].eq(latest_date)].copy()
 
-    return funds.merge(
-        aum,
-        on=["factset_fund_id", "fund_reference_date"],
-        how="left",
-        validate="many_to_one"
-    )
+    return h
