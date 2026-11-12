@@ -1,21 +1,87 @@
 def select_quarter_holdings(raw_holdings, analysis_date):
     h = raw_holdings.copy()
 
-    h["report_date"] = pd.to_datetime(h["report_date"])
-    analysis_date = pd.Timestamp(analysis_date)
+    h["report_date"] = pd.to_datetime(
+        h["report_date"], errors="coerce"
+    ).dt.normalize()
 
-    # Keep holdings whose report date is in the current calendar quarter
+    # Only use holdings as of the analysis date
     h = h.loc[
-        h["report_date"].dt.to_period("Q")
-        == analysis_date.to_period("Q")
+        h["report_date"].notna()
+        & h["report_date"].le(pd.Timestamp(analysis_date).normalize())
     ].copy()
 
-    # For each fund, find its latest report date within this quarter
-    latest_date = h.groupby(
-        "factset_fund_id"
-    )["report_date"].transform("max")
+    # Keep each fund's latest report date
+    latest = h.groupby("factset_fund_id")["report_date"].transform("max")
 
-    # Keep ALL holdings belonging to that fund's latest report date
-    h = h.loc[h["report_date"].eq(latest_date)].copy()
+    return h.loc[h["report_date"].eq(latest)].copy()
 
-    return h
+
+def add_holdings_sum(funds, raw_holdings, analysis_date):
+    n = raw_holdings.copy()
+
+    n["report_date"] = pd.to_datetime(
+        n["report_date"], errors="coerce"
+    ).dt.normalize()
+
+    n["reported_mv"] = pd.to_numeric(
+        n["reported_mv"], errors="coerce"
+    )
+
+    # Only use data available as of analysis date
+    n = n.loc[
+        n["report_date"].notna()
+        & n["report_date"].le(pd.Timestamp(analysis_date).normalize())
+    ].copy()
+
+    # Latest report date for each fund
+    latest = n.groupby("factset_fund_id")["report_date"].transform("max")
+    n = n.loc[n["report_date"].eq(latest)].copy()
+
+    # Sum ALL holdings, including unmapped securities
+    aum = n.groupby("factset_fund_id", as_index=False).agg(
+        fund_aum_from_holdings=(
+            "reported_mv", lambda s: s.sum(min_count=1)
+        ),
+        aum_holdings_report_date=("report_date", "max"),
+        aum_missing_mv_rows=("reported_mv", lambda s: s.isna().sum()),
+    )
+
+    # Each main loop contains one analysis date
+    return funds.merge(
+        aum,
+        on="factset_fund_id",
+        how="left",
+        validate="many_to_one"
+    )
+
+
+
+funds = clean_funds(raw, analysis_date)
+
+quarter_holdings = select_quarter_holdings(
+    raw["holdings"], analysis_date
+)
+
+funds = add_holdings_sum(
+    funds, quarter_holdings, analysis_date
+)
+
+funds["vendor_fund_aum"] = funds["fund_aum_usd_assumed"]
+
+funds["fund_aum_usd_assumed"] = (
+    funds["fund_aum_from_holdings"]
+    .where(funds["fund_aum_from_holdings"].gt(0))
+)
+
+funds["aum_source"] = "holdings_sum"
+funds.loc[
+    funds["fund_aum_usd_assumed"].isna(), "aum_source"
+] = "missing_holdings_sum"
+
+positions = map_securities(
+    quarter_holdings,
+    raw["security_map"],
+    date_column="report_date",
+    lookup_column="fsym_security_id"
+)
