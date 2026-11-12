@@ -1,0 +1,30 @@
+def add_holdings_aum(funds, raw_holdings, analysis_date):
+    h = raw_holdings.copy()
+
+    h["report_date"] = pd.to_datetime(h["report_date"])
+    h["reported_mv"] = pd.to_numeric(
+        h["reported_mv"], errors="coerce"
+    )
+
+    # Only use holdings available as of analysis date
+    h = h[h["report_date"] <= analysis_date]
+
+    # Sum ALL holdings, including unmapped securities
+    aum = h.groupby(
+        ["factset_fund_id", "report_date"], as_index=False
+    )["reported_mv"].sum(min_count=1)
+
+    # Latest available holdings date for each fund
+    aum = aum.sort_values("report_date").drop_duplicates(
+        "factset_fund_id", keep="last"
+    )
+
+    aum = aum.rename(columns={
+        "report_date": "aum_holdings_date",
+        "reported_mv": "fund_aum_from_holdings"
+    })
+
+    return funds.merge(
+        aum, on="factset_fund_id",
+        how="left", validate="many_to_one"
+    )
