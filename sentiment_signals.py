@@ -1,129 +1,52 @@
-"""Additional stock-level conviction, disagreement and positioning-change factors."""
+请基于现有 Mutual Fund Positioning Project，增加三个 Stock-level Sentiment Signals。
 
-import numpy as np
-import pandas as pd
-import pyarrow.parquet as pq
+**要求：**
+- 先检查现有 `main.py`、`sentiment.py` 的实际代码和数据结构。
+- 尽量不要修改现有代码，尤其不要改 `pull_data.py`、`cleandata.py` 和原有计算逻辑。
+- 新建一个简单的 `sentiment_signals.py`，把新增计算写成独立 Functions。
+- 在 `main.py` 现有 Sentiment Aggregation 完成后调用，输出新的 `aggregate_stock_extended.parquet`，保留原始 Output。
+- 代码简单易读，少量必要的英文 Comments，不要引入复杂 Class 或额外模块。
 
+### 1. Manager Conviction
 
-def add_manager_signals(
-    portfolio_path,
-    stock_summary,
-    neutral_band_pct=0.1,
-    conviction_cutoff=0.90,
-    stock_id_column="security_id",
-    aum_column="fund_aum",
-):
-    """Rank absolute active weights within each fund/month, then summarize by stock."""
-    keys = ["analysis_date", stock_id_column]
-    fund_keys = ["analysis_date", "factset_fund_id"]
-    columns = keys + [
-        "factset_fund_id", "portfolio_weight_pct", "benchmark_weight_pct",
-        "active_value", aum_column,
-    ]
-    new_columns = [
-        "high_conviction_overweight_pct", "mean_conviction_rank_pct",
-        "active_weight_std_pct", "active_weight_iqr_pct",
-        "median_conviction_pool_count",
-    ]
+对于每个 Fund × Month：
 
-    available = set(pq.ParquetFile(portfolio_path).schema_arrow.names)
-    if missing := set(columns) - available:
-        raise ValueError(f"Missing fund_stock columns: {sorted(missing)}")
-    if not 0 < conviction_cutoff < 1:
-        raise ValueError("conviction_cutoff must be between 0 and 1")
+- 使用全部有效的 Fund × Stock 记录作为 Ranking Pool，包括 Benchmark-only Stocks。
+- 按 `abs(active_weight_pct)` 排名，识别 Top 10% 的主动偏离仓位。
+- 正向 Overweight 才计入 High-conviction Overweight。
+- 对每只 Stock 汇总 `high_conviction_overweight_pct`。
+- 同时保留每只基金的 Ranking Pool Size，方便检查样本覆盖。
 
-    summary = stock_summary.copy()
-    summary["analysis_date"] = pd.to_datetime(summary["analysis_date"])
-    if summary.duplicated(keys).any():
-        raise ValueError("Duplicate stock/date rows in stock_summary")
-    if set(new_columns) & set(summary.columns):
-        raise ValueError("Manager signal columns already exist in stock_summary")
+### 2. Manager Disagreement
 
-    dates = pq.read_table(portfolio_path, columns=["analysis_date"]).to_pandas()
-    dates = pd.to_datetime(dates["analysis_date"]).drop_duplicates().sort_values()
-    monthly = []
+对于每个 Stock × Month：
 
-    for date in dates:
-        frame = pq.read_table(
-            portfolio_path, columns=columns, filters=[("analysis_date", "=", date)]
-        ).to_pandas()
-        if frame.empty:
-            continue
-        frame["analysis_date"] = pd.to_datetime(frame["analysis_date"])
-        if frame.duplicated(fund_keys + [stock_id_column]).any():
-            raise ValueError(f"Duplicate fund/stock records for {date.date()}")
+- 计算所有有效基金的 Active Weight Standard Deviation。
+- 计算 Active Weight IQR（P75 − P25）。
+- 输出 `active_weight_std_pct`、`active_weight_iqr_pct`。
+- 基金等权，缺失值不能当成零。
 
-        for column in ["portfolio_weight_pct", "benchmark_weight_pct", "active_value", aum_column]:
-            frame[column] = pd.to_numeric(frame[column], errors="raise")
-        valid = (
-            frame["portfolio_weight_pct"].notna()
-            & frame["benchmark_weight_pct"].notna()
-            & frame["active_value"].notna()
-            & frame[aum_column].gt(0)
-        )
-        active_pct = 100 * frame["active_value"] / frame[aum_column].where(frame[aum_column].gt(0))
-        valid &= np.isfinite(active_pct)
-        frame["active_pct"] = active_pct.where(valid)
+### 3. Positioning Change
 
-        # Pool: all valid stocks in the same fund/month, including benchmark-only rows.
-        by_fund = frame.groupby(fund_keys, sort=False)
-        frame["conviction_rank"] = by_fund["active_pct"].transform(
-            lambda x: x.abs().rank(pct=True)
-        )
-        frame["conviction_pool_count"] = by_fund["active_pct"].transform("count").where(valid)
-        frame["high_conviction_overweight"] = (
-            valid & frame["conviction_rank"].gt(conviction_cutoff)
-            & frame["active_pct"].gt(neutral_band_pct)
-        )
+比较同一只 Stock 连续两个月的 Aggregate Sentiment：
 
-        grouped = frame.groupby(keys, dropna=False, sort=False)
-        extra = grouped.agg(
-            valid_fund_count=("active_pct", "count"),
-            high_conviction_count=("high_conviction_overweight", "sum"),
-            mean_conviction_rank=("conviction_rank", "mean"),
-            active_weight_std_pct=("active_pct", "std"),
-            median_conviction_pool_count=("conviction_pool_count", "median"),
-        )
-        extra["active_weight_iqr_pct"] = (
-            grouped["active_pct"].quantile(0.75)
-            - grouped["active_pct"].quantile(0.25)
-        ).where(extra["valid_fund_count"].ge(2))
-        extra["high_conviction_overweight_pct"] = (
-            100 * extra["high_conviction_count"]
-            / extra["valid_fund_count"].where(extra["valid_fund_count"].gt(0))
-        )
-        extra["mean_conviction_rank_pct"] = 100 * extra["mean_conviction_rank"]
-        monthly.append(extra.reset_index()[keys + new_columns])
+- `active_weight_change_1m_pp`：AUM-weighted Active Weight 的月度变化。
+- `overweight_pct_change_1m_pp`：Overweight Fund Percentage 的月度变化。
+- 第一月或缺失相邻月份时保留 NaN。
+- 不要把两期样本变化直接解释为基金实际买卖行为。
 
-    if not monthly:
-        return summary.assign(**{column: np.nan for column in new_columns})
-    extra = pd.concat(monthly, ignore_index=True)
-    if extra.duplicated(keys).any():
-        raise ValueError("Duplicate stock/date rows in manager signal output")
-    return summary.merge(extra, on=keys, how="left", validate="one_to_one")
+### 4. 验证与交付
 
+请先确认现有字段名称、计算单位、有效基金定义，以及每月基金股票记录的唯一性，**不要直接假设我之前提供的代码正确**。
 
-def add_positioning_changes(stock_summary, stock_id_column="security_id"):
-    """Calculate adjacent-month stock positioning changes in percentage points."""
-    keys = ["analysis_date", stock_id_column]
-    metrics = ["aum_weighted_active_weight_pct", "overweight_pct"]
-    if missing := set(keys + metrics) - set(stock_summary.columns):
-        raise ValueError(f"Missing stock sentiment columns: {sorted(missing)}")
+新增 Signals 必须与原 `sentiment.py` 使用相同的 Valid Contributor 标准和 Stock Identifier。
 
-    result = stock_summary.copy()
-    result["analysis_date"] = pd.to_datetime(result["analysis_date"])
-    if result.duplicated(keys).any():
-        raise ValueError("Duplicate stock/date rows before positioning changes")
-    result = result.sort_values([stock_id_column, "analysis_date"])
-    by_stock = result.groupby(stock_id_column, sort=False)
-    prior_date = by_stock["analysis_date"].shift(1)
-    consecutive = result["analysis_date"].eq(prior_date + pd.offsets.MonthEnd(1))
+完成后：
 
-    # A missing month must not be treated as a one-month change.
-    result["active_weight_change_1m_pp"] = (
-        result[metrics[0]] - by_stock[metrics[0]].shift(1)
-    ).where(consecutive)
-    result["overweight_pct_change_1m_pp"] = (
-        result[metrics[1]] - by_stock[metrics[1]].shift(1)
-    ).where(consecutive)
-    return result
+1. 告诉我新文件放在哪里。
+2. 告诉我 `main.py` 具体在哪一行插入 Import 和 Function Calls。
+3. 给出两个关键 Debug Breakpoints，以及应检查的 DataFrame 和 Columns。
+4. 用少量真实数据验证 Conviction 排名、Std、IQR、Monthly Changes。
+5. 如果发现不确定的数据口径或字段问题，先说明，不要自行假设或大幅修改项目。
+
+**核心原则：只增加这三个研究方向，最小化代码改动，确保代码容易人工 Review 和 Debug。**
